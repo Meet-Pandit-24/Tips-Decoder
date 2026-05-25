@@ -272,11 +272,16 @@ def decode_tip(
     obj = get_session()
     ohlc_map = {}
     api_calls_this_search = 0
+    exact_match_found = False
     
     for exch, tkns in tokens_by_exch.items():
+        if exact_match_found:
+            break
         if tkns:
              # API allows up to 50 tokens per request
              for i in range(0, len(tkns), 50):
+                 if exact_match_found:
+                     break
                  batch = tkns[i : i + 50]
                  try:
                      increment_api_call()
@@ -296,6 +301,14 @@ def decode_tip(
                              # Update cache
                              with _cache_lock:
                                  _prev_close_cache[tok] = float(item.get("close", 0) or 0)
+                                 
+                             # Check for exact match early exit
+                             opt_close = _prev_close_cache[tok]
+                             if abs(opt_close - prev_close) < 0.01:
+                                 exact_match_found = True
+                     
+                     if exact_match_found:
+                         break
                      
                      # Protect Angel One API Rate Limits (max 3 per second)
                      time.sleep(0.35)
@@ -532,6 +545,17 @@ def update_tip(tip_id):
             tip.target_price = float(body['target_price']) if body['target_price'] else None
         if 'stop_loss' in body:
             tip.stop_loss = float(body['stop_loss']) if body['stop_loss'] else None
+        db.session.commit()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/tips/<int:tip_id>", methods=["DELETE"])
+def delete_tip(tip_id):
+    try:
+        tip = Tip.query.get_or_404(tip_id)
+        db.session.delete(tip)
         db.session.commit()
         return jsonify({"status": "success"})
     except Exception as e:

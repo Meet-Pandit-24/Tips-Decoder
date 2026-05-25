@@ -43,6 +43,11 @@ function renderTrackerTable() {
                 <button class="save-btn" style="padding: 4px 8px; font-size: 10px;" onclick="closeTip(${tip.id}, 'TARGET_HIT')">TG</button>
                 <button class="save-btn" style="padding: 4px 8px; font-size: 10px; background: var(--red);" onclick="closeTip(${tip.id}, 'SL_HIT')">SL</button>
                 <button class="save-btn" style="padding: 4px 8px; font-size: 10px; background: var(--text-3);" onclick="closeTip(${tip.id}, 'MANUAL_EXIT')">Exit</button>
+                <button class="save-btn" style="padding: 4px 8px; font-size: 10px; background: transparent; border: 1px solid var(--red); color: var(--red);" onclick="deleteTip(${tip.id})" title="Delete">🗑️</button>
+            `;
+        } else {
+            actions = `
+                <button class="save-btn" style="padding: 4px 8px; font-size: 10px; background: transparent; border: 1px solid var(--red); color: var(--red);" onclick="deleteTip(${tip.id})" title="Delete">🗑️</button>
             `;
         }
         
@@ -141,5 +146,19 @@ window.closeTip = async function(id, newStatus) {
         }
     } catch(err) {
         alert("Failed to update tip status");
+    }
+};
+
+window.deleteTip = async function(id) {
+    if(!confirm("Are you sure you want to delete this tip?")) return;
+    try {
+        const res = await fetch(`/api/tips/${id}`, {
+            method: 'DELETE'
+        });
+        if(res.ok) {
+            await fetchTips();
+        }
+    } catch(err) {
+        alert("Failed to delete tip");
     }
 };
