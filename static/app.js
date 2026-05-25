@@ -35,7 +35,20 @@ function setupTabs() {
 /* ── OCR (Screenshot Paste) ─────────────────────────────────── */
 function setupOCR() {
   const pasteZone = document.getElementById('pasteZone');
+  const fileInput = document.getElementById('imageUpload');
   
+  // Mobile upload via tap
+  pasteZone.addEventListener('click', () => {
+    fileInput.click();
+  });
+  
+  // Handle file selection
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processImageOCR(e.target.files[0]);
+    }
+  });
+
   // Listen for paste anywhere on document
   document.addEventListener('paste', async (e) => {
     const items = (e.clipboardData || e.originalEvent.clipboardData).items;
@@ -87,7 +100,13 @@ async function processImageOCR(imageBlob) {
     setTimeout(() => {
         pasteZone.classList.remove('loading');
         setTimeout(() => {
-            pasteZone.innerHTML = '<div class="paste-icon">🖼️</div><p><strong>Paste Screenshot Here (Ctrl+V)</strong></p><p class="paste-sub">Price and Change will auto-fill via OCR</p>';
+            pasteZone.innerHTML = '<div class="paste-icon">🖼️</div><p><strong>Tap/Click here to Upload or Paste (Ctrl+V)</strong></p><p class="paste-sub">Price and Change will auto-fill via OCR</p><input type="file" id="imageUpload" accept="image/*" style="display: none;" />';
+            // Re-bind the change event since we just overwrote the input element
+            document.getElementById('imageUpload').addEventListener('change', (e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                    processImageOCR(e.target.files[0]);
+                }
+            });
         }, 5000); // Reset after 5s
     }, 500);
 }
@@ -520,7 +539,12 @@ function clearFields() {
   
   // Reset paste zone
   const pasteZone = document.getElementById('pasteZone');
-  pasteZone.innerHTML = '<div class="paste-icon">🖼️</div><p><strong>Paste Screenshot Here (Ctrl+V)</strong></p><p class="paste-sub">Price and Change will auto-fill via OCR</p>';
+  pasteZone.innerHTML = '<div class="paste-icon">🖼️</div><p><strong>Tap/Click here to Upload or Paste (Ctrl+V)</strong></p><p class="paste-sub">Price and Change will auto-fill via OCR</p><input type="file" id="imageUpload" accept="image/*" style="display: none;" />';
+  document.getElementById('imageUpload').addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+          processImageOCR(e.target.files[0]);
+      }
+  });
   
   // Clear results
   setUIState('idle');

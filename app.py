@@ -10,10 +10,11 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 
+from functools import wraps
 import pyotp
 import requests
 import pandas as pd
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from SmartApi import SmartConnect
 from dotenv import load_dotenv
 
@@ -28,6 +29,7 @@ if db_url.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.secret_key = os.getenv("SECRET_KEY", "super-secret-tips-key")
 db.init_app(app)
 
 # Create tables if they don't exist
@@ -393,14 +395,58 @@ def _match_quality(match_pct: float) -> str:
     return "WEAK"
 
 
+# ── Authentication ────────────────────────────────────────────
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # If APP_PASSWORD is not set in env, disable auth completely
+        app_password = os.getenv("APP_PASSWORD")
+        if not app_password:
+            return f(*args, **kwargs)
+            
+        if not session.get('logged_in'):
+            # Return 401 for API routes
+            if request.path.startswith('/api/'):
+                return jsonify({"error": "Unauthorized"}), 401
+            # Redirect to login for pages
+            return redirect(url_for('login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    app_password = os.getenv("APP_PASSWORD")
+    # If no password configured, just redirect to home
+    if not app_password:
+        return redirect(url_for('index'))
+        
+    error = None
+    if request.method == "POST":
+        if request.form.get("password") == app_password:
+            session['logged_in'] = True
+            return redirect(request.args.get("next") or url_for("index"))
+        else:
+            error = "Invalid password."
+            
+    return render_template("login.html", error=error)
+
+@app.route("/logout")
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for("login"))
+
+
 # ── Flask Routes ──────────────────────────────────────────────
 
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
 
 @app.route("/api/status")
+@login_required
 def api_status():
     try:
         obj = get_session()
@@ -418,6 +464,7 @@ def api_status():
 
 
 @app.route("/api/instruments/reload", methods=["POST"])
+@login_required
 def reload_instruments():
     global _instrument_df, _instrument_cache_date
     with _instrument_lock:
@@ -431,6 +478,7 @@ def reload_instruments():
 
 
 @app.route("/api/lot-sizes")
+@login_required
 def lot_sizes():
     """Return available lot sizes in NFO for autocomplete."""
     try:
@@ -442,6 +490,7 @@ def lot_sizes():
 
 
 @app.route("/api/decode", methods=["POST"])
+@login_required
 def decode():
     try:
         body = request.get_json(force=True)
@@ -499,6 +548,7 @@ def decode():
 # ── Tracking Endpoints ────────────────────────────────────────
 
 @app.route("/api/tips", methods=["POST"])
+@login_required
 def save_tip():
     try:
         body = request.get_json(force=True)
@@ -525,6 +575,7 @@ def save_tip():
         return jsonify({"error": str(e)}), 400
 
 @app.route("/api/tips", methods=["GET"])
+@login_required
 def get_tips():
     try:
         tips = Tip.query.order_by(Tip.timestamp.desc()).all()
@@ -533,6 +584,7 @@ def get_tips():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/tips/<int:tip_id>", methods=["PUT"])
+@login_required
 def update_tip(tip_id):
     try:
         tip = Tip.query.get_or_404(tip_id)
@@ -552,6 +604,7 @@ def update_tip(tip_id):
         return jsonify({"error": str(e)}), 400
 
 @app.route("/api/tips/<int:tip_id>", methods=["DELETE"])
+@login_required
 def delete_tip(tip_id):
     try:
         tip = Tip.query.get_or_404(tip_id)
@@ -563,6 +616,7 @@ def delete_tip(tip_id):
         return jsonify({"error": str(e)}), 400
 
 @app.route("/api/tips/live", methods=["GET"])
+@login_required
 def get_tips_live():
     # Fetch live price for OPEN tips
     try:
@@ -615,6 +669,7 @@ def get_tips_live():
 
 
 @app.route("/api/stats", methods=["GET"])
+@login_required
 def get_stats():
     return jsonify({"total_api_calls": _total_api_calls})
 

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login — Tips Decoder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .login-panel {
+      max-width: 400px;
+      width: 100%;
+      padding: 32px;
+      text-align: center;
+    }
+    .login-brand {
+      margin-bottom: 32px;
+    }
+    .login-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    .login-input {
+      margin-bottom: 24px;
+      width: 100%;
+      text-align: center;
+      letter-spacing: 2px;
+    }
+    .error-msg {
+      color: var(--red);
+      font-size: 13px;
+      margin-top: -16px;
+      margin-bottom: 16px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel login-panel">
+    <div class="login-brand">
+      <div class="login-icon">⚡</div>
+      <h1 class="brand-title" style="font-size:24px">Tips Decoder</h1>
+      <p class="brand-sub">Private Access Only</p>
+    </div>
+    
+    <form method="POST" action="/login">
+      {% if error %}
+        <span class="error-msg">{{ error }}</span>
+      {% endif %}
+      <div class="field-group">
+        <input 
+          type="password" 
+          name="password" 
+          class="field-input login-input" 
+          placeholder="Enter Password" 
+          required 
+          autofocus
+        />
+      </div>
+      <button type="submit" class="primary-btn" style="width: 100%">Unlock</button>
+    </form>
+  </div>
+</body>
+</html>
