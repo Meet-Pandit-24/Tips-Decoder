@@ -1,0 +1,609 @@
+"""
+Tips Decoder — Backend (Flask + Angel One SmartAPI)
+Decodes a trading tip by finding the exact stock option and strike price
+that matches the given current price, change, and lot size.
+"""
+
+import os
+import json
+import threading
+from datetime import date, datetime, timedelta
+
+import pyotp
+import requests
+import pandas as pd
+from flask import Flask, render_template, request, jsonify
+from SmartApi import SmartConnect
+from dotenv import load_dotenv
+
+from models import db, Tip
+
+load_dotenv()
+
+app = Flask(__name__)
+# Database config
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///tips_tracker.db")
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
+
+# Create tables if they don't exist
+with app.app_context():
+    db.create_all()
+
+# ── Globals ──────────────────────────────────────────────────
+_smart_api: SmartConnect | None = None
+_session_data: dict | None = None
+_session_lock = threading.Lock()
+
+_instrument_df: pd.DataFrame | None = None
+_instrument_cache_date: date | None = None
+_instrument_lock = threading.Lock()
+
+_prev_close_cache = {}
+_prev_close_cache_date = None
+_cache_lock = threading.Lock()
+
+_total_api_calls = 0
+_api_lock = threading.Lock()
+
+def increment_api_call(count=1):
+    global _total_api_calls
+    with _api_lock:
+        _total_api_calls += count
+
+INSTRUMENT_MASTER_URL = (
+    "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+)
+
+# ── Angel One Session ─────────────────────────────────────────
+
+def get_session(force_refresh: bool = False) -> SmartConnect:
+    global _smart_api, _session_data
+    with _session_lock:
+        if _smart_api is None or _session_data is None or force_refresh:
+            api_key   = os.getenv("ANGEL_API_KEY", "")
+            client_id = os.getenv("ANGEL_CLIENT_ID", "")
+            password  = os.getenv("ANGEL_PASSWORD", "")
+            totp_sec  = os.getenv("ANGEL_TOTP_SECRET", "")
+
+            if not all([api_key, client_id, password, totp_sec]):
+                raise ValueError("Missing Angel One credentials in .env file")
+
+            obj = SmartConnect(api_key=api_key)
+            totp = pyotp.TOTP(totp_sec).now()
+            
+            increment_api_call()
+            sess = obj.generateSession(client_id, password, totp)
+
+            if not sess or not sess.get("status"):
+                raise ConnectionError(
+                    f"Angel One login failed: {sess.get('message', 'Unknown error')}"
+                )
+
+            _smart_api = obj
+            _session_data = sess
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Angel One session established for {client_id}")
+
+    return _smart_api
+
+
+# ── Instrument Master ─────────────────────────────────────────
+
+def get_instrument_df() -> pd.DataFrame:
+    global _instrument_df, _instrument_cache_date
+    today = date.today()
+
+    with _instrument_lock:
+        if _instrument_df is None or _instrument_cache_date != today:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Downloading instrument master...")
+            resp = requests.get(INSTRUMENT_MASTER_URL, timeout=30)
+            resp.raise_for_status()
+            raw = resp.json()
+
+            df = pd.DataFrame(raw)
+
+            # Keep NFO and BFO options only
+            df = df[df["exch_seg"].isin(["NFO", "BFO"])].copy()
+            df = df[df["instrumenttype"].isin(["OPTIDX", "OPTSTK"])].copy()
+
+            # Clean up columns
+            df["lotsize"] = pd.to_numeric(df["lotsize"], errors="coerce").fillna(0).astype(int)
+            # Angel One stores strike as integer × 100 (e.g., 24000 → 2400000)
+            df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0) / 100
+
+            # Parse expiry
+            # BFO uses slightly different expiry sometimes, but usually ddMMMyyyy works.
+            df["expiry_dt"] = pd.to_datetime(df["expiry"], format="%d%b%Y", errors="coerce")
+
+            # Option type from symbol suffix
+            df["opt_type"] = df["symbol"].str[-2:]  # CE or PE
+
+            # Underlying name (instrument name)
+            df["underlying"] = df["name"].str.strip()
+
+            _instrument_df = df
+            _instrument_cache_date = today
+            print(f"  -> Loaded {len(df):,} NFO option instruments")
+
+    return _instrument_df
+
+
+def get_upcoming_expiries(df: pd.DataFrame, count: int = 3) -> list[date]:
+    """Return the next `count` unique expiry dates from today."""
+    today = pd.Timestamp(date.today())
+    future = df[df["expiry_dt"] >= today]["expiry_dt"].dropna().unique()
+    future_sorted = sorted(future)
+    return future_sorted[:count]
+
+
+# ── Core Decode Logic ─────────────────────────────────────────
+
+def calculate_prev_close(current_price: float, abs_change: float | None, pct_change: float | None) -> float:
+    """
+    Calculate the option's previous trading-day close.
+    - abs_change: e.g. -1.03 (negative = price fell)
+    - pct_change: e.g. -16.04 (negative = price fell)
+    Returns prev_close as float.
+    """
+    if abs_change is not None:
+        # prev_close = current - change  (if change is -1.03, prev = 5.39 - (-1.03) = 6.42)
+        return current_price - abs_change
+    elif pct_change is not None:
+        # current = prev * (1 + pct/100)  →  prev = current / (1 + pct/100)
+        return current_price / (1 + pct_change / 100)
+    raise ValueError("Provide abs_change or pct_change")
+
+
+def fetch_ohlc_batch(obj: SmartConnect, tokens: list[str]) -> dict[str, dict]:
+    """
+    Fetch OHLC for a batch of NFO tokens.
+    Returns dict: token → {ltp, close (prev day close), open, high, low, tradingSymbol}
+    """
+    results = {}
+    # API allows up to 50 tokens per request
+    for i in range(0, len(tokens), 50):
+        batch = tokens[i : i + 50]
+        try:
+            resp = obj.getMarketData("OHLC", {"NFO": batch})
+            if resp and resp.get("status") and resp.get("data", {}).get("fetched"):
+                for item in resp["data"]["fetched"]:
+                    tok = str(item.get("symbolToken", ""))
+                    results[tok] = {
+                        "ltp":           float(item.get("ltp", 0) or 0),
+                        "prev_close":    float(item.get("close", 0) or 0),   # close = prev day close
+                        "open":          float(item.get("open", 0) or 0),
+                        "high":          float(item.get("high", 0) or 0),
+                        "low":           float(item.get("low", 0) or 0),
+                        "tradingSymbol": item.get("tradingSymbol", ""),
+                    }
+        except Exception as e:
+            print(f"  [WARN] OHLC batch {i}-{i+50} error: {e}")
+    return results
+
+
+def decode_tip(
+    current_price: float,
+    abs_change: float | None,
+    pct_change: float | None,
+    lot_size: int,
+    option_type: str,          # "CE" or "PE" or "BOTH"
+    expiry_scope: str,         # "nearest" | "weekly" | "monthly" | "all"
+    tolerance_pct: float = 8,  # match tolerance in % of prev_close
+) -> dict:
+    prev_close = calculate_prev_close(current_price, abs_change, pct_change)
+    tolerance  = prev_close * (tolerance_pct / 100)
+
+    df = get_instrument_df()
+
+    # 1. Filter by lot size OR Index Options
+    if lot_size > 0:
+        filtered = df[df["lotsize"] == lot_size].copy()
+        if filtered.empty:
+            # Try nearby lot sizes (± 1 step) to catch rounding
+            nearby = [lot_size - 1, lot_size + 1, lot_size - 25, lot_size + 25]
+            filtered = df[df["lotsize"].isin(nearby)].copy()
+            if filtered.empty:
+                return {"error": f"No instruments with lot size {lot_size}"}
+    else:
+        # Index Options search fallback
+        index_names = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX']
+        filtered = df[df["underlying"].isin(index_names)].copy()
+        if filtered.empty:
+             return {"error": "No Index instruments found"}
+
+    # 2. Filter by option type
+    if option_type in ("CE", "PE"):
+        filtered = filtered[filtered["opt_type"] == option_type]
+
+    # 3. Filter by expiry scope
+    today = pd.Timestamp(date.today())
+    filtered = filtered[filtered["expiry_dt"] >= today]
+
+    if expiry_scope == "nearest":
+        # Check current and next expiry
+        upcoming = sorted(filtered["expiry_dt"].dropna().unique())[:2]
+        if upcoming:
+            filtered = filtered[filtered["expiry_dt"].isin(upcoming)]
+    elif expiry_scope == "weekly":
+        upcoming = sorted(filtered["expiry_dt"].dropna().unique())
+        if upcoming:
+            # Take expiries within next 8 days
+            cutoff = today + pd.Timedelta(days=8)
+            filtered = filtered[filtered["expiry_dt"] <= cutoff]
+    elif expiry_scope == "monthly":
+        upcoming = sorted(filtered["expiry_dt"].dropna().unique())[:3]
+        filtered = filtered[filtered["expiry_dt"].isin(upcoming)]
+
+    if filtered.empty:
+        return {"error": "No instruments match lot size + option type + expiry filters"}
+
+    # 4. Filter tokens using cache to reduce API calls
+    global _prev_close_cache, _prev_close_cache_date
+    with _cache_lock:
+        if _prev_close_cache_date != date.today():
+            _prev_close_cache = {}
+            _prev_close_cache_date = date.today()
+
+    tokens_by_exch = {"NFO": [], "BFO": []}
+    for _, row in filtered.iterrows():
+        exch = row["exch_seg"]
+        tok = str(row["token"])
+        
+        # If in cache, check if it's within tolerance. If not, SKIP IT ENTIRELY!
+        if tok in _prev_close_cache:
+            diff = abs(_prev_close_cache[tok] - prev_close)
+            if diff > tolerance:
+                continue # Saved an API call for this token!
+                
+        # If not in cache, or if in cache and MATCHES tolerance, we must fetch it (to get LTP or cache it)
+        if exch in tokens_by_exch:
+            tokens_by_exch[exch].append(tok)
+            
+    # Fetch OHLC for remaining tokens
+    obj = get_session()
+    ohlc_map = {}
+    api_calls_this_search = 0
+    
+    for exch, tkns in tokens_by_exch.items():
+        if tkns:
+             # API allows up to 50 tokens per request
+             for i in range(0, len(tkns), 50):
+                 batch = tkns[i : i + 50]
+                 try:
+                     increment_api_call()
+                     api_calls_this_search += 1
+                     resp = obj.getMarketData("OHLC", {exch: batch})
+                     if resp and resp.get("status") and resp.get("data", {}).get("fetched"):
+                         for item in resp["data"]["fetched"]:
+                             tok = str(item.get("symbolToken", ""))
+                             ohlc_map[tok] = {
+                                 "ltp":           float(item.get("ltp", 0) or 0),
+                                 "prev_close":    float(item.get("close", 0) or 0),
+                                 "open":          float(item.get("open", 0) or 0),
+                                 "high":          float(item.get("high", 0) or 0),
+                                 "low":           float(item.get("low", 0) or 0),
+                                 "tradingSymbol": item.get("tradingSymbol", ""),
+                             }
+                             # Update cache
+                             with _cache_lock:
+                                 _prev_close_cache[tok] = float(item.get("close", 0) or 0)
+                 except Exception as e:
+                     print(f"  [WARN] OHLC batch {i}-{i+50} error: {e}")
+
+    # 5. Find matches
+    matches = []
+    seen_symbols = set()
+
+    for _, row in filtered.iterrows():
+        tok = str(row["token"])
+        
+        # If token was skipped due to cache, we skip processing it here too.
+        if tok not in ohlc_map:
+            # If it's in cache and matched, but API failed, we'd skip.
+            # If it's in cache and didn't match, we definitely skip.
+            continue
+            
+        mkt = ohlc_map[tok]
+        opt_prev_close = mkt["prev_close"]
+
+        if opt_prev_close <= 0:
+            continue  # illiquid / no data
+
+        diff = abs(opt_prev_close - prev_close)
+        match_pct = (diff / prev_close) * 100
+
+        if diff <= tolerance:
+            key = f"{row['underlying']}_{row['strike']}_{row['opt_type']}_{row['expiry']}"
+            if key in seen_symbols:
+                continue
+            seen_symbols.add(key)
+
+            matches.append({
+                "underlying":          row["underlying"],
+                "symbol":              row["symbol"],
+                "token":               tok,
+                "strike":              float(row["strike"]),
+                "expiry":              row["expiry"],
+                "expiry_dt":           str(row["expiry_dt"].date()),
+                "opt_type":            row["opt_type"],
+                "lot_size":            int(row["lotsize"]),
+                "ltp":                 round(mkt["ltp"], 2),
+                "opt_prev_close":      round(opt_prev_close, 2),
+                "calc_prev_close":     round(prev_close, 2),
+                "diff":                round(diff, 2),
+                "match_pct":           round(match_pct, 2),
+                "match_quality":       _match_quality(match_pct),
+                "open":                round(mkt["open"], 2),
+                "high":                round(mkt["high"], 2),
+                "low":                 round(mkt["low"], 2),
+                "instrumenttype":      row["instrumenttype"],
+            })
+
+    # Sort: best match first
+    matches.sort(key=lambda x: x["match_pct"])
+
+    return {
+        "calc_prev_close":  round(prev_close, 2),
+        "current_price":    current_price,
+        "abs_change":       abs_change,
+        "pct_change":       pct_change,
+        "lot_size":         lot_size,
+        "option_type":      option_type,
+        "expiry_scope":     expiry_scope,
+        "tolerance_pct":    tolerance_pct,
+        "tokens_searched":  len(ohlc_map),
+        "total_matches":    len(matches),
+        "api_calls_made":   api_calls_this_search,
+        "matches":          matches[:25],
+    }
+
+
+def _match_quality(match_pct: float) -> str:
+    if match_pct <= 2:
+        return "EXACT"
+    elif match_pct <= 5:
+        return "STRONG"
+    elif match_pct <= 8:
+        return "GOOD"
+    return "WEAK"
+
+
+# ── Flask Routes ──────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/status")
+def api_status():
+    try:
+        obj = get_session()
+        increment_api_call()
+        profile = obj.getProfile(obj.refresh_token if hasattr(obj, "refresh_token") else "")
+        name = profile.get("data", {}).get("name", os.getenv("ANGEL_CLIENT_ID", "Connected"))
+        return jsonify({"status": "connected", "client": name})
+    except Exception as e:
+        # Try fresh login
+        try:
+            obj = get_session(force_refresh=True)
+            return jsonify({"status": "connected", "client": os.getenv("ANGEL_CLIENT_ID")})
+        except Exception as e2:
+            return jsonify({"status": "error", "message": str(e2)}), 503
+
+
+@app.route("/api/instruments/reload", methods=["POST"])
+def reload_instruments():
+    global _instrument_df, _instrument_cache_date
+    with _instrument_lock:
+        _instrument_df = None
+        _instrument_cache_date = None
+    try:
+        df = get_instrument_df()
+        return jsonify({"status": "ok", "count": len(df)})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/lot-sizes")
+def lot_sizes():
+    """Return available lot sizes in NFO for autocomplete."""
+    try:
+        df = get_instrument_df()
+        sizes = sorted(df["lotsize"].unique().tolist())
+        return jsonify({"lot_sizes": sizes})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/decode", methods=["POST"])
+def decode():
+    try:
+        body = request.get_json(force=True)
+
+        # Validate required fields
+        current_price = float(body.get("current_price", 0))
+        lot_size      = int(body.get("lot_size", 0))
+
+        if current_price <= 0:
+            return jsonify({"error": "current_price must be > 0"}), 400
+        if lot_size <= 0:
+            return jsonify({"error": "lot_size must be > 0"}), 400
+
+        # Change: prefer abs_change, fallback to pct_change
+        abs_change = body.get("abs_change")
+        pct_change = body.get("pct_change")
+
+        if abs_change is not None:
+            abs_change = float(abs_change)
+        if pct_change is not None:
+            pct_change = float(pct_change)
+
+        if abs_change is None and pct_change is None:
+            return jsonify({"error": "Provide abs_change or pct_change"}), 400
+
+        option_type   = body.get("option_type", "BOTH").upper()
+        expiry_scope  = body.get("expiry_scope", "nearest")
+        tolerance_pct = float(body.get("tolerance_pct", 8))
+
+        result = decode_tip(
+            current_price=current_price,
+            abs_change=abs_change,
+            pct_change=pct_change,
+            lot_size=lot_size,
+            option_type=option_type,
+            expiry_scope=expiry_scope,
+            tolerance_pct=tolerance_pct,
+        )
+
+        if "error" in result:
+            return jsonify(result), 404
+
+        return jsonify(result)
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except ConnectionError as e:
+        return jsonify({"error": f"Angel One connection failed: {e}"}), 503
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Tracking Endpoints ────────────────────────────────────────
+
+@app.route("/api/tips", methods=["POST"])
+def save_tip():
+    try:
+        body = request.get_json(force=True)
+        tip = Tip(
+            symbol=body['symbol'],
+            underlying=body['underlying'],
+            strike=float(body['strike']),
+            expiry=body['expiry'],
+            opt_type=body['opt_type'],
+            lot_size=int(body['lot_size']),
+            instrument_type=body['instrument_type'],
+            entry_price=float(body['entry_price']),
+            entry_ltp=float(body['entry_ltp']),
+            target_price=float(body['target_price']) if body.get('target_price') else None,
+            stop_loss=float(body['stop_loss']) if body.get('stop_loss') else None,
+            mode=body.get('mode', 'OBSERVER'),
+            notes=body.get('notes', '')
+        )
+        db.session.add(tip)
+        db.session.commit()
+        return jsonify({"status": "success", "id": tip.id})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/tips", methods=["GET"])
+def get_tips():
+    try:
+        tips = Tip.query.order_by(Tip.timestamp.desc()).all()
+        return jsonify({"tips": [t.to_dict() for t in tips]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/tips/<int:tip_id>", methods=["PUT"])
+def update_tip(tip_id):
+    try:
+        tip = Tip.query.get_or_404(tip_id)
+        body = request.get_json(force=True)
+        if 'status' in body:
+            tip.status = body['status']
+        if 'notes' in body:
+            tip.notes = body['notes']
+        if 'target_price' in body:
+            tip.target_price = float(body['target_price']) if body['target_price'] else None
+        if 'stop_loss' in body:
+            tip.stop_loss = float(body['stop_loss']) if body['stop_loss'] else None
+        db.session.commit()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/tips/live", methods=["GET"])
+def get_tips_live():
+    # Fetch live price for OPEN tips
+    try:
+        open_tips = Tip.query.filter_by(status='OPEN').all()
+        if not open_tips:
+            return jsonify({"prices": {}})
+        
+        # We need to map symbol to token
+        # Get df to find tokens
+        df = get_instrument_df()
+        
+        tokens_by_exch = {"NFO": [], "BFO": []}
+        tip_id_to_token = {}
+        
+        for tip in open_tips:
+            # Find the token for this tip's symbol
+            match = df[df['symbol'] == tip.symbol]
+            if not match.empty:
+                tok = str(match.iloc[0]['token'])
+                exch = str(match.iloc[0]['exch_seg'])
+                tip_id_to_token[tip.id] = tok
+                if exch in tokens_by_exch:
+                    tokens_by_exch[exch].append(tok)
+        
+        obj = get_session()
+        live_prices = {}
+        
+        for exch, tkns in tokens_by_exch.items():
+            if tkns:
+                for i in range(0, len(tkns), 50):
+                    batch = tkns[i : i + 50]
+                    try:
+                        increment_api_call()
+                        resp = obj.getMarketData("OHLC", {exch: batch})
+                        if resp and resp.get("status") and resp.get("data", {}).get("fetched"):
+                            for item in resp["data"]["fetched"]:
+                                live_prices[str(item.get("symbolToken"))] = float(item.get("ltp", 0) or 0)
+                    except Exception as e:
+                        print(f"[WARN] Live OHLC fetch error: {e}")
+                        
+        # Map back to tip ID
+        tip_prices = {}
+        for tip_id, tok in tip_id_to_token.items():
+            if tok in live_prices:
+                tip_prices[tip_id] = live_prices[tok]
+                
+        return jsonify({"prices": tip_prices})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/stats", methods=["GET"])
+def get_stats():
+    return jsonify({"total_api_calls": _total_api_calls})
+
+
+# ── Startup ───────────────────────────────────────────────────
+
+def warmup():
+    """Pre-load instrument master and establish Angel One session on startup."""
+    try:
+        get_session()
+        get_instrument_df()
+        print("[OK] Warmup complete - Tips Decoder is ready!")
+    except Exception as e:
+        print(f"[WARN] Warmup warning: {e}")
+        print("   Fill in credentials in the .env file and restart.")
+
+
+if __name__ == "__main__":
+    port  = int(os.getenv("PORT", 5000))
+    debug = os.getenv("DEBUG", "false").lower() == "true"
+
+    print("=" * 55)
+    print("  TIPS DECODER — Angel One SmartAPI")
+    print("=" * 55)
+
+    warmup()
+
+    app.run(host="0.0.0.0", port=port, debug=debug)

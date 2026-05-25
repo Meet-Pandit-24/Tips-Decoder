@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tips Decoder — Instant Option Finder</title>
+  <meta name="description" content="Instantly decode trading tips by finding the exact stock option and strike price using Angel One SmartAPI." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header class="header">
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <h1 class="brand-title">Tips Decoder</h1>
+        <p class="brand-sub">Instant Option Finder · Angel One SmartAPI</p>
+      </div>
+    </div>
+    
+    <div class="header-tabs" id="mainTabs">
+      <button class="tab-btn active" data-target="decoderView">Decoder</button>
+      <button class="tab-btn" data-target="dashboardView">Dashboard</button>
+    </div>
+
+    <div class="connection-badge" id="connectionBadge">
+      <span class="conn-dot" id="connDot"></span>
+      <span class="conn-label" id="connLabel">Connecting…</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<main class="main" id="decoderView">
+
+  <!-- LEFT: Input Panel -->
+  <section class="panel input-panel">
+    <h2 class="panel-title">
+      <span class="panel-icon">📋</span>
+      Tip Details
+    </h2>
+    
+    <!-- OCR PASTE ZONE -->
+    <div class="paste-zone" id="pasteZone">
+        <div class="paste-icon">🖼️</div>
+        <p><strong>Paste Screenshot Here (Ctrl+V)</strong></p>
+        <p class="paste-sub">Price and Change will auto-fill via OCR</p>
+    </div>
+
+    <!-- PRICE INFO -->
+    <div class="field-group">
+      <label for="currentPrice">Entry Price (Tip Buy Price)</label>
+      <input type="number" id="currentPrice" placeholder="e.g. 5.39" step="0.05" />
+    </div>
+
+    <!-- CHANGE ROW -->
+    <div class="change-row">
+      <div class="field-group flex-1">
+        <label class="field-label" for="absChange">Change (₹)</label>
+        <div class="input-wrap">
+          <input
+            id="absChange"
+            type="number"
+            step="0.01"
+            placeholder="e.g. -1.03"
+            class="field-input"
+            autocomplete="off"
+          />
+        </div>
+      </div>
+      <div class="change-or">OR</div>
+      <div class="field-group flex-1">
+        <label class="field-label" for="pctChange">Change (%)</label>
+        <div class="input-wrap">
+          <input
+            id="pctChange"
+            type="number"
+            step="0.01"
+            placeholder="e.g. -16.04"
+            class="field-input"
+            autocomplete="off"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- PREV CLOSE PREVIEW -->
+    <div class="prev-close-preview" id="prevClosePreview" style="display:none">
+      <span class="prev-close-label">Calculated Previous Close</span>
+      <span class="prev-close-value" id="prevCloseValue">—</span>
+    </div>
+
+    <!-- LOT SIZE -->
+    <div class="field-group">
+      <label class="field-label" for="lotSize">Lot Size</label>
+      <div class="input-wrap">
+        <input
+          id="lotSize"
+          type="number"
+          step="1"
+          min="1"
+          placeholder="e.g. 75, 1800, 600"
+          class="field-input"
+          list="lotSizeOptions"
+          autocomplete="off"
+        />
+        <datalist id="lotSizeOptions"></datalist>
+      </div>
+    </div>
+
+    <!-- OPTION TYPE & EXPIRY -->
+    <div class="field-group row-group">
+      <div class="half">
+        <label>Option Type</label>
+        <div class="segmented-control" id="optionTypeCtrl">
+          <button class="seg-btn" data-value="CE">CE</button>
+          <button class="seg-btn" data-value="PE">PE</button>
+          <button class="seg-btn active" data-value="BOTH">BOTH</button>
+        </div>
+      </div>
+
+      <div class="field-group flex-1">
+        <label class="field-label">Expiry</label>
+        <div class="seg-control" id="expiryCtrl">
+          <button class="seg-btn active" data-value="nearest" id="btnNearest">Nearest</button>
+          <button class="seg-btn" data-value="weekly" id="btnWeekly">Weekly</button>
+          <button class="seg-btn" data-value="all" id="btnAll">All</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADVANCED -->
+    <div class="field-group">
+      <div style="display:flex; justify-content:space-between;">
+        <label>Match Tolerance</label>
+        <span class="hint-val" id="toleranceHint">2%</span>
+      </div>
+      <input type="range" id="tolerance" min="0" max="5" value="2" step="1" />
+    </div>
+
+    <!-- ACTION -->
+    <div style="display:flex; gap:10px;">
+        <button class="primary-btn" id="decodeBtn" onclick="runDecode()" style="flex:1;">
+          <span class="btn-icon" id="decodeBtnIcon">⚡</span>
+          <span id="decodeBtnText">Decode Now</span>
+        </button>
+        <button class="secondary-btn" onclick="clearFields()" style="background:var(--bg-card); border:1px solid var(--border);">Clear All</button>
+    </div>
+
+    <!-- QUICK FILL EXAMPLE -->
+    <button class="example-btn" onclick="fillExample()">Fill Screenshot Example</button>
+  </section>
+
+  <!-- RIGHT: Results Panel -->
+  <section class="panel results-panel" id="resultsPanel">
+
+    <!-- IDLE STATE -->
+    <div class="idle-state" id="idleState">
+      <div class="idle-icon">🔍</div>
+      <p class="idle-text">Enter tip details and click <strong>Decode Now</strong></p>
+      <p class="idle-sub">The app will scan all NFO options with the given lot size and find the exact strike matching your previous close.</p>
+    </div>
+
+    <!-- LOADING STATE -->
+    <div class="loading-state" id="loadingState" style="display:none">
+      <div class="spinner"></div>
+      <p class="loading-text">Scanning option chains…</p>
+      <p class="loading-sub" id="loadingSub">Fetching instrument data from Angel One</p>
+    </div>
+
+    <!-- RESULTS STATE -->
+    <div id="resultsContent" style="display:none">
+      <div class="results-summary" id="resultsSummary"></div>
+      <div class="matches-list" id="matchesList"></div>
+    </div>
+
+    <!-- ERROR STATE -->
+    <div class="error-state" id="errorState" style="display:none">
+      <div class="error-icon">⚠️</div>
+      <p class="error-text" id="errorText"></p>
+      <button class="retry-btn" onclick="runDecode()">Retry</button>
+    </div>
+
+  </section>
+</main>
+
+<!-- ═══════════════ DASHBOARD ═══════════════ -->
+<main class="main dashboard-view" id="dashboardView" style="display:none;">
+    <section class="panel full-width-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+            <h2 class="panel-title" style="margin-bottom:0;"><span class="panel-icon">📊</span> Trading Tips Dashboard</h2>
+            <button id="syncPricesBtn" class="secondary-btn" onclick="syncLivePrices()" style="background:var(--border); color:var(--text-1); border:1px solid rgba(255,255,255,0.2);">🔄 Sync Live LTP</button>
+        </div>
+        
+        <div class="analytics-row">
+            <div class="stat-card">
+                <div class="stat-card-title">Total Tips</div>
+                <div class="stat-card-value" id="dashTotalTips">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-title">Win Rate</div>
+                <div class="stat-card-value green" id="dashWinRate">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-title">Expected Profit (Open)</div>
+                <div class="stat-card-value gold" id="dashExpProfit">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-title">API Calls</div>
+                <div class="stat-card-value blue" id="dashApiCalls">-</div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table class="tracker-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Symbol</th>
+                        <th>Entry</th>
+                        <th>Live LTP</th>
+                        <th>Target</th>
+                        <th>SL</th>
+                        <th>Status</th>
+                        <th>Mode</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="trackerTableBody">
+                    <!-- Populated by JS -->
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+
+<script src="/static/app.js"></script>
+<script src="/static/dashboard.js"></script>
+</body>
+</html>
