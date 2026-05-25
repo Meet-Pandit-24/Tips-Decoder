@@ -7,6 +7,7 @@ that matches the given current price, change, and lot size.
 import os
 import json
 import threading
+import time
 from datetime import date, datetime, timedelta
 
 import pyotp
@@ -103,11 +104,17 @@ def get_instrument_df() -> pd.DataFrame:
             resp.raise_for_status()
             raw = resp.json()
 
-            df = pd.DataFrame(raw)
-
-            # Keep NFO and BFO options only
-            df = df[df["exch_seg"].isin(["NFO", "BFO"])].copy()
-            df = df[df["instrumenttype"].isin(["OPTIDX", "OPTSTK"])].copy()
+            # Memory optimization: Filter directly during list comprehension before making a DataFrame
+            filtered_data = [
+                item for item in raw 
+                if item.get("exch_seg") in ["NFO", "BFO"] 
+                and item.get("instrumenttype") in ["OPTIDX", "OPTSTK"]
+            ]
+            
+            # Free the massive raw json from memory immediately
+            del raw
+            
+            df = pd.DataFrame(filtered_data)
 
             # Clean up columns
             df["lotsize"] = pd.to_numeric(df["lotsize"], errors="coerce").fillna(0).astype(int)
@@ -115,7 +122,6 @@ def get_instrument_df() -> pd.DataFrame:
             df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0) / 100
 
             # Parse expiry
-            # BFO uses slightly different expiry sometimes, but usually ddMMMyyyy works.
             df["expiry_dt"] = pd.to_datetime(df["expiry"], format="%d%b%Y", errors="coerce")
 
             # Option type from symbol suffix
@@ -290,6 +296,9 @@ def decode_tip(
                              # Update cache
                              with _cache_lock:
                                  _prev_close_cache[tok] = float(item.get("close", 0) or 0)
+                     
+                     # Protect Angel One API Rate Limits (max 3 per second)
+                     time.sleep(0.35)
                  except Exception as e:
                      print(f"  [WARN] OHLC batch {i}-{i+50} error: {e}")
 
