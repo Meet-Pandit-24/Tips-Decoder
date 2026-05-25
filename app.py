@@ -598,6 +598,8 @@ def warmup():
         print(f"[WARN] Warmup warning: {e}")
         print("   Fill in credentials in the .env file and restart.")
 
+# Start warmup in a background thread so it doesn't block Gunicorn from starting
+threading.Thread(target=warmup, daemon=True).start()
 
 if __name__ == "__main__":
     port  = int(os.getenv("PORT", 5000))
@@ -606,7 +608,5 @@ if __name__ == "__main__":
     print("=" * 55)
     print("  TIPS DECODER — Angel One SmartAPI")
     print("=" * 55)
-
-    warmup()
 
     app.run(host="0.0.0.0", port=port, debug=debug)
