@@ -12,11 +12,11 @@ from datetime import date, datetime, timedelta
 
 from functools import wraps
 import pyotp
-import requests
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from SmartApi import SmartConnect
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from models import db, Tip, PrevCloseCache
 
@@ -284,62 +284,61 @@ def decode_tip(
             tokens_by_exch[exch].append(tok)
             
     # Fetch OHLC for remaining tokens
+    # Fetch OHLC for remaining tokens concurrently
     obj = get_session()
     ohlc_map = {}
     api_calls_this_search = 0
-    exact_match_found = False
     
+    batches_to_fetch = []
     for exch, tkns in tokens_by_exch.items():
-        if exact_match_found:
-            break
-        if tkns:
-             # API allows up to 50 tokens per request
-             for i in range(0, len(tkns), 50):
-                 if exact_match_found:
-                     break
-                 batch = tkns[i : i + 50]
-                 try:
-                     increment_api_call()
-                     api_calls_this_search += 1
-                     resp = obj.getMarketData("OHLC", {exch: batch})
-                     if resp and resp.get("status") and resp.get("data", {}).get("fetched"):
-                         new_caches = []
-                         for item in resp["data"]["fetched"]:
-                             tok = str(item.get("symbolToken", ""))
-                             opt_close = float(item.get("close", 0) or 0)
-                             ohlc_map[tok] = {
-                                 "ltp":           float(item.get("ltp", 0) or 0),
-                                 "prev_close":    opt_close,
-                                 "open":          float(item.get("open", 0) or 0),
-                                 "high":          float(item.get("high", 0) or 0),
-                                 "low":           float(item.get("low", 0) or 0),
-                                 "tradingSymbol": item.get("tradingSymbol", ""),
-                             }
-                             # Update memory cache and prepare DB insert
-                             with _cache_lock:
-                                 if tok not in _prev_close_cache:
-                                     _prev_close_cache[tok] = opt_close
-                                     new_caches.append(PrevCloseCache(token=tok, date=today_date, prev_close=opt_close))
-                                 
-                             # Check for exact match early exit
-                             if abs(opt_close - prev_close) < 0.01:
-                                 exact_match_found = True
-                         
-                         if new_caches:
-                             try:
-                                 db.session.bulk_save_objects(new_caches)
-                                 db.session.commit()
-                             except Exception as e:
-                                 db.session.rollback()
-                                 print(f"[WARN] DB cache bulk insert failed: {e}")
-                     
-                     if exact_match_found:
-                         break
-                     
-                     # Protect Angel One API Rate Limits (max 3 per second)
-                     time.sleep(0.35)
-                 except Exception as e:
-                     print(f"  [WARN] OHLC batch {i}-{i+50} error: {e}")
+        for i in range(0, len(tkns), 50):
+            batches_to_fetch.append((exch, tkns[i : i + 50]))
+            
+    if batches_to_fetch:
+        print(f"Fetching {len(batches_to_fetch)} batches from Angel One...")
+        
+        def fetch_batch(exch, batch):
+            try:
+                # We do a tiny sleep based on a lock to maintain rate limits across threads
+                with _instrument_lock:
+                    time.sleep(0.35)
+                increment_api_call()
+                resp = obj.getMarketData("OHLC", {exch: batch})
+                return resp
+            except Exception as e:
+                print(f"[WARN] OHLC batch error: {e}")
+                return None
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_batch = {executor.submit(fetch_batch, exch, batch): batch for exch, batch in batches_to_fetch}
+            for future in as_completed(future_to_batch):
+                api_calls_this_search += 1
+                resp = future.result()
+                if resp and resp.get("status") and resp.get("data", {}).get("fetched"):
+                    new_caches = []
+                    for item in resp["data"]["fetched"]:
+                        tok = str(item.get("symbolToken", ""))
+                        opt_close = float(item.get("close", 0) or 0)
+                        ohlc_map[tok] = {
+                            "ltp":           float(item.get("ltp", 0) or 0),
+                            "prev_close":    opt_close,
+                            "open":          float(item.get("open", 0) or 0),
+                            "high":          float(item.get("high", 0) or 0),
+                            "low":           float(item.get("low", 0) or 0),
+                            "tradingSymbol": item.get("tradingSymbol", ""),
+                        }
+                        with _cache_lock:
+                            if tok not in _prev_close_cache:
+                                _prev_close_cache[tok] = opt_close
+                                new_caches.append(PrevCloseCache(token=tok, date=today_date, prev_close=opt_close))
+                    
+                    if new_caches:
+                        try:
+                            # DB writes are fast, we can do them per batch
+                            db.session.bulk_save_objects(new_caches)
+                            db.session.commit()
+                        except Exception as e:
+                            db.session.rollback()
 
     # 5. Find matches
     matches = []
@@ -598,7 +597,27 @@ def place_order():
 
         increment_api_call()
         print(f"Placing Order: {orderparams}")
-        order_response = obj.placeOrder(orderparams)
+        
+        # Bypass SDK swallowing exceptions by making a direct requests.post
+        try:
+            import requests
+            headers = {
+                "Authorization": f"Bearer {getattr(obj, 'access_token', '')}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-UserType": "USER",
+                "X-SourceID": "WEB",
+                "X-ClientLocalIP": "127.0.0.1",
+                "X-ClientPublicIP": "127.0.0.1",
+                "X-MACAddress": "00-00-00-00-00-00",
+                "X-PrivateKey": os.getenv("ANGEL_API_KEY")
+            }
+            url = obj.rootUrl + "/rest/secure/angelbroking/order/v1/placeOrder"
+            resp = requests.post(url, json=orderparams, headers=headers)
+            order_response = resp.json()
+        except Exception as e:
+            return jsonify({"error": f"Direct request failed: {str(e)}"}), 400
+            
         print(f"Order Response: {order_response}")
         
         if not order_response:
