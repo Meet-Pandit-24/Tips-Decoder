@@ -37,12 +37,12 @@ function renderTrackerTable() {
             month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
         });
         
-        let actions = '';
         if(tip.status === 'OPEN') {
             actions = `
                 <button class="save-btn" style="padding: 4px 8px; font-size: 10px;" onclick="closeTip(${tip.id}, 'TARGET_HIT')">TG</button>
                 <button class="save-btn" style="padding: 4px 8px; font-size: 10px; background: var(--red);" onclick="closeTip(${tip.id}, 'SL_HIT')">SL</button>
                 <button class="save-btn" style="padding: 4px 8px; font-size: 10px; background: var(--text-3);" onclick="closeTip(${tip.id}, 'MANUAL_EXIT')">Exit</button>
+                <button class="save-btn" style="padding: 4px 8px; font-size: 10px; background: rgba(59, 130, 246, 0.2); border: 1px solid var(--blue); color: var(--text-1);" onclick='openOrderModalFromTip(${JSON.stringify(tip).replace(/'/g, "&#39;")})' title="Execute Trade">⚡</button>
                 <button class="save-btn" style="padding: 4px 8px; font-size: 10px; background: transparent; border: 1px solid var(--red); color: var(--red);" onclick="deleteTip(${tip.id})" title="Delete">🗑️</button>
             `;
         } else {
@@ -135,11 +135,27 @@ window.syncLivePrices = async function() {
 };
 
 window.closeTip = async function(id, newStatus) {
+    let exitPrice = null;
+    if (newStatus !== 'OPEN') {
+        let defaultLtp = document.getElementById(`live_ltp_${id}`)?.textContent.replace('₹', '') || '';
+        let userInput = prompt(`Closing this trade as ${newStatus}.\nPlease enter the exact Exit Price:`, defaultLtp);
+        if (userInput === null) return; // User cancelled
+        
+        exitPrice = parseFloat(userInput);
+        if (isNaN(exitPrice)) {
+            alert("Invalid exit price. Trade not closed.");
+            return;
+        }
+    }
+
     try {
+        const payload = { status: newStatus };
+        if (exitPrice !== null) payload.exit_price = exitPrice;
+
         const res = await fetch(`/api/tips/${id}`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ status: newStatus })
+            body: JSON.stringify(payload)
         });
         if(res.ok) {
             await fetchTips();
@@ -160,5 +176,24 @@ window.deleteTip = async function(id) {
         }
     } catch(err) {
         alert("Failed to delete tip");
+    }
+};
+
+window.openOrderModalFromTip = function(tip) {
+    const match = {
+        underlying: tip.underlying,
+        symbol: tip.symbol,
+        token: tip.token || "", // We don't store token in Tip table currently, but order might need it.
+        strike: tip.strike,
+        expiry: tip.expiry,
+        opt_type: tip.opt_type,
+        lot_size: tip.lot_size,
+        instrumenttype: tip.instrument_type,
+        ltp: tip.entry_ltp
+    };
+    // Wait, token is not in Tip table! 
+    // It's okay, we'll try to find it from instrument master in backend, or we need to add token to models.
+    if (window.openOrderModal) {
+        window.openOrderModal(match, tip.entry_price);
     }
 };

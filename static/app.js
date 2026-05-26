@@ -27,6 +27,8 @@ function setupTabs() {
       
       if(tab.dataset.target === 'dashboardView' && window.loadDashboard) {
           window.loadDashboard();
+      } else if(tab.dataset.target === 'analyticsView' && window.loadAnalytics) {
+          window.loadAnalytics();
       }
     });
   });
@@ -427,14 +429,15 @@ function buildMatchCard(m, idx, currentPrice) {
           <div class="save-row">
               <input type="number" id="tg_${idx}" class="save-input" placeholder="Target (e.g. ${Math.round(m.ltp * 1.5)})">
               <input type="number" id="sl_${idx}" class="save-input" placeholder="Stop Loss (e.g. ${Math.round(m.ltp * 0.7)})">
-              <select id="mode_${idx}" class="save-input" style="flex:0.5">
+              <select id="mode_${idx}" class="save-input" style="flex:0.5; display:none;">
                   <option value="OBSERVER">Paper Trade</option>
                   <option value="TRADED">Real Trade</option>
               </select>
           </div>
           <div class="save-row">
               <input type="text" id="notes_${idx}" class="save-input" placeholder="Notes (optional)...">
-              <button class="save-btn" onclick='saveTip(${JSON.stringify(m).replace(/'/g, "&#39;")}, ${currentPrice}, ${idx})'>Save to Tracker</button>
+              <button class="save-btn" onclick='saveTip(${JSON.stringify(m).replace(/'/g, "&#39;")}, ${currentPrice}, ${idx}, "OBSERVER")'>Paper Trade (Save)</button>
+              <button class="primary-btn" style="padding: 10px 16px; font-size: 13px;" onclick='openOrderModal(${JSON.stringify(m).replace(/'/g, "&#39;")}, ${currentPrice})'>⚡ Execute Trade</button>
           </div>
       </div>
       
@@ -443,11 +446,11 @@ function buildMatchCard(m, idx, currentPrice) {
 }
 
 /* ── Save Tip ────────────────────────────────────────────────── */
-async function saveTip(match, entryPrice, idx) {
-    const tg = document.getElementById(`tg_${idx}`).value;
-    const sl = document.getElementById(`sl_${idx}`).value;
-    const mode = document.getElementById(`mode_${idx}`).value;
-    const notes = document.getElementById(`notes_${idx}`).value;
+async function saveTip(match, entryPrice, idx, forceMode=null) {
+    const tg = document.getElementById(`tg_${idx}`)?.value;
+    const sl = document.getElementById(`sl_${idx}`)?.value;
+    const mode = forceMode || (document.getElementById(`mode_${idx}`)?.value || 'OBSERVER');
+    const notes = document.getElementById(`notes_${idx}`)?.value;
     const btn = event.target;
     
     btn.disabled = true;
@@ -456,6 +459,7 @@ async function saveTip(match, entryPrice, idx) {
     try {
         const payload = {
             symbol: match.symbol,
+            token: match.token,
             underlying: match.underlying,
             strike: match.strike,
             expiry: match.expiry,
@@ -550,7 +554,138 @@ function clearFields() {
   setUIState('idle');
 }
 
+/* ── Order Modal Logic ───────────────────────────────────────── */
+window.openOrderModal = function(match, entryPrice) {
+    document.getElementById('orderModal').classList.add('show');
+    document.getElementById('orderSymbol').textContent = `${match.underlying} ${match.expiry} ${match.strike} ${match.opt_type}`;
+    
+    // Fill hidden fields
+    document.getElementById('orderToken').value = match.token;
+    document.getElementById('orderExchange').value = 'NFO'; // Assuming NFO for options
+    document.getElementById('orderUnderlying').value = match.underlying;
+    document.getElementById('orderStrike').value = match.strike;
+    document.getElementById('orderExpiry').value = match.expiry;
+    document.getElementById('orderOptType').value = match.opt_type;
+    document.getElementById('orderInstrumentType').value = match.instrumenttype;
+    document.getElementById('orderEntryPrice').value = entryPrice;
+    document.getElementById('orderEntryLtp').value = match.ltp;
+    
+    // Fill Lot Size
+    document.getElementById('orderLotSize').value = match.lot_size;
+    document.getElementById('orderQtyHint').textContent = `Qty: ${match.lot_size}`;
+    document.getElementById('orderLots').value = 1;
+    
+    // Reset inputs
+    document.getElementById('orderType').value = 'MARKET';
+    document.getElementById('orderProduct').value = 'CARRYFORWARD';
+    document.getElementById('orderPrice').value = match.ltp;
+    document.getElementById('orderTarget').value = '';
+    document.getElementById('orderSL').value = '';
+    document.getElementById('orderError').style.display = 'none';
+    
+    toggleOrderPrice();
+    
+    // Add event listener to update qty hint dynamically
+    document.getElementById('orderLots').addEventListener('input', function() {
+        const lots = parseInt(this.value) || 0;
+        const ls = parseInt(document.getElementById('orderLotSize').value) || 0;
+        document.getElementById('orderQtyHint').textContent = `Qty: ${lots * ls}`;
+    });
+};
+
+window.closeOrderModal = function() {
+    document.getElementById('orderModal').classList.remove('show');
+};
+
+window.toggleOrderPrice = function() {
+    const type = document.getElementById('orderType').value;
+    document.getElementById('orderPriceGroup').style.display = type === 'LIMIT' ? 'block' : 'none';
+};
+
+window.submitOrder = async function() {
+    const btn = document.getElementById('submitOrderBtn');
+    const err = document.getElementById('orderError');
+    err.style.display = 'none';
+    
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+    
+    try {
+        const payload = {
+            symbol: document.getElementById('orderSymbol').textContent.trim(),
+            token: document.getElementById('orderToken').value,
+            transaction_type: 'BUY',
+            exchange: document.getElementById('orderExchange').value,
+            order_type: document.getElementById('orderType').value,
+            product_type: document.getElementById('orderProduct').value,
+            lots: parseInt(document.getElementById('orderLots').value),
+            lot_size: parseInt(document.getElementById('orderLotSize').value),
+            price: document.getElementById('orderPrice').value
+        };
+        
+        // 1. Place the order
+        const orderRes = await fetch('/api/order', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        
+        const orderData = await orderRes.json();
+        if(!orderRes.ok || orderData.error) {
+            throw new Error(orderData.error || 'Failed to place order');
+        }
+        
+        // 2. Save to Tracker automatically!
+        const tg = document.getElementById('orderTarget').value;
+        const sl = document.getElementById('orderSL').value;
+        
+        const tipPayload = {
+            symbol: payload.symbol,
+            underlying: document.getElementById('orderUnderlying').value,
+            strike: document.getElementById('orderStrike').value,
+            expiry: document.getElementById('orderExpiry').value,
+            opt_type: document.getElementById('orderOptType').value,
+            lot_size: payload.lot_size,
+            instrument_type: document.getElementById('orderInstrumentType').value,
+            entry_price: document.getElementById('orderEntryPrice').value,
+            entry_ltp: document.getElementById('orderEntryLtp').value,
+            target_price: tg ? parseFloat(tg) : null,
+            stop_loss: sl ? parseFloat(sl) : null,
+            mode: 'TRADED', // It's a real trade!
+            notes: `Auto-Executed. Order ID: ${orderData.order_id}`
+        };
+        
+        await fetch('/api/tips', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(tipPayload)
+        });
+        
+        btn.textContent = 'Order Placed! ✅';
+        btn.style.background = 'var(--green)';
+        
+        setTimeout(() => {
+            closeOrderModal();
+            btn.disabled = false;
+            btn.textContent = 'Submit BUY Order';
+            btn.style.background = 'var(--accent)';
+        }, 2000);
+        
+    } catch(e) {
+        err.textContent = e.message;
+        err.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Submit BUY Order';
+    }
+};
+
 /* ── Enter key shortcut ──────────────────────────────────────── */
 document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) runDecode();
+  if (e.key === 'Enter' && !e.shiftKey) {
+      if(document.getElementById('orderModal').classList.contains('show')) {
+          submitOrder();
+      } else {
+          runDecode();
+      }
+  }
 });

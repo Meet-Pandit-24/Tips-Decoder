@@ -10,7 +10,8 @@ class Tip(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Decoded Info
-    symbol = db.Column(db.String(50), nullable=False)
+    symbol = db.Column(db.String(100), nullable=False)
+    token = db.Column(db.String(50), nullable=True)
     underlying = db.Column(db.String(50), nullable=False)
     strike = db.Column(db.Float, nullable=False)
     expiry = db.Column(db.String(20), nullable=False)
@@ -52,6 +53,7 @@ class Tip(db.Model):
             'id': self.id,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'symbol': self.symbol,
+            'token': self.token,
             'underlying': self.underlying,
             'strike': self.strike,
             'expiry': self.expiry,

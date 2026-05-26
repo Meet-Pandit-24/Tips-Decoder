@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -26,6 +27,7 @@
     <div class="header-tabs" id="mainTabs">
       <button class="tab-btn active" data-target="decoderView">Decoder</button>
       <button class="tab-btn" data-target="dashboardView">Dashboard</button>
+      <button class="tab-btn" data-target="analyticsView">Analytics</button>
     </div>
 
     <div class="connection-badge" id="connectionBadge">
@@ -240,7 +242,113 @@
     </section>
 </main>
 
+<!-- ═══════════════ ANALYTICS ═══════════════ -->
+<main class="main analytics-view" id="analyticsView" style="display:none;">
+    <section class="panel full-width-panel">
+        <h2 class="panel-title"><span class="panel-icon">📈</span> Profit & Loss Analytics</h2>
+        
+        <div class="analytics-row">
+            <div class="stat-card">
+                <div class="stat-card-title">Realized P&L</div>
+                <div class="stat-card-value" id="statRealPL">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-title">Real Win Rate</div>
+                <div class="stat-card-value" id="statRealWinRate">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-title">Paper P&L</div>
+                <div class="stat-card-value" id="statPaperPL">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card-title">Paper Win Rate</div>
+                <div class="stat-card-value" id="statPaperWinRate">-</div>
+            </div>
+        </div>
+
+        <div style="height:400px; margin-top:40px;">
+            <canvas id="plChart"></canvas>
+        </div>
+    </section>
+</main>
+
+
+<!-- ═══════════════ ORDER MODAL ═══════════════ -->
+<div id="orderModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 class="modal-title">⚡ Execute Trade</h3>
+      <button class="close-btn" onclick="closeOrderModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="order-symbol" id="orderSymbol">BANKNIFTY 24MAY 48000 CE</p>
+      
+      <input type="hidden" id="orderToken" />
+      <input type="hidden" id="orderExchange" />
+      <input type="hidden" id="orderUnderlying" />
+      <input type="hidden" id="orderStrike" />
+      <input type="hidden" id="orderExpiry" />
+      <input type="hidden" id="orderOptType" />
+      <input type="hidden" id="orderInstrumentType" />
+      <input type="hidden" id="orderEntryPrice" />
+      <input type="hidden" id="orderEntryLtp" />
+
+      <div class="field-group row-group">
+        <div class="half">
+          <label>Quantity (Lots)</label>
+          <input type="number" id="orderLots" class="field-input" value="1" min="1" step="1" />
+          <span class="hint-val" id="orderQtyHint" style="font-size:11px; margin-top:4px; display:block;">Qty: 15</span>
+        </div>
+        <div class="half">
+          <label>Lot Size</label>
+          <input type="number" id="orderLotSize" class="field-input" readonly style="background:var(--bg-panel);" />
+        </div>
+      </div>
+
+      <div class="field-group row-group">
+        <div class="half">
+          <label>Order Type</label>
+          <select id="orderType" class="field-input" onchange="toggleOrderPrice()">
+            <option value="MARKET">Market</option>
+            <option value="LIMIT">Limit</option>
+          </select>
+        </div>
+        <div class="half">
+          <label>Product Type</label>
+          <select id="orderProduct" class="field-input">
+            <option value="CARRYFORWARD">Carryforward (NRML)</option>
+            <option value="INTRADAY">Intraday (MIS)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-group" id="orderPriceGroup" style="display:none">
+        <label>Limit Price</label>
+        <input type="number" id="orderPrice" class="field-input" step="0.05" />
+      </div>
+
+      <div class="field-group row-group" style="margin-top:20px; border-top:1px solid var(--border); padding-top:20px;">
+        <div class="half">
+          <label>Target Price</label>
+          <input type="number" id="orderTarget" class="field-input" step="0.05" placeholder="Optional" />
+        </div>
+        <div class="half">
+          <label>Stop Loss</label>
+          <input type="number" id="orderSL" class="field-input" step="0.05" placeholder="Optional" />
+        </div>
+      </div>
+      
+      <p id="orderError" class="red" style="font-size:12px; margin-top:10px; display:none;"></p>
+    </div>
+    <div class="modal-footer" style="display:flex; gap:10px; margin-top:20px;">
+      <button class="secondary-btn" onclick="closeOrderModal()" style="flex:1;">Cancel</button>
+      <button class="primary-btn submit-btn" id="submitOrderBtn" onclick="submitOrder()" style="flex:1; background:var(--accent); color:#000;">Submit BUY Order</button>
+    </div>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 <script src="/static/dashboard.js"></script>
+<script src="/static/analytics.js"></script>
 </body>
 </html>

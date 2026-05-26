@@ -569,6 +569,43 @@ def decode():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/order", methods=["POST"])
+@login_required
+def place_order():
+    try:
+        body = request.get_json(force=True)
+        obj = get_session()
+        
+        # Calculate actual quantity (Lots * Lot Size)
+        lots = int(body.get("lots", 1))
+        lot_size = int(body.get("lot_size", 1))
+        qty = lots * lot_size
+
+        orderparams = {
+            "variety": "NORMAL",
+            "tradingsymbol": body.get("symbol"),
+            "symboltoken": body.get("token"),
+            "transactiontype": body.get("transaction_type", "BUY"),
+            "exchange": body.get("exchange", "NFO"),
+            "ordertype": body.get("order_type", "MARKET"),
+            "producttype": body.get("product_type", "CARRYFORWARD"),
+            "duration": "DAY",
+            "quantity": str(qty)
+        }
+        
+        if orderparams["ordertype"] == "LIMIT":
+            orderparams["price"] = str(body.get("price", 0))
+
+        increment_api_call()
+        order_id = obj.placeOrder(orderparams)
+        
+        if not order_id:
+            return jsonify({"error": "Failed to place order. Broker returned empty response."}), 400
+            
+        return jsonify({"status": "success", "order_id": order_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ── Tracking Endpoints ────────────────────────────────────────
 
 @app.route("/api/tips", methods=["POST"])
@@ -578,6 +615,7 @@ def save_tip():
         body = request.get_json(force=True)
         tip = Tip(
             symbol=body['symbol'],
+            token=body.get('token'),
             underlying=body['underlying'],
             strike=float(body['strike']),
             expiry=body['expiry'],
@@ -621,6 +659,9 @@ def update_tip(tip_id):
             tip.target_price = float(body['target_price']) if body['target_price'] else None
         if 'stop_loss' in body:
             tip.stop_loss = float(body['stop_loss']) if body['stop_loss'] else None
+        if 'exit_price' in body:
+            tip.exit_price = float(body['exit_price']) if body['exit_price'] else None
+            
         db.session.commit()
         return jsonify({"status": "success"})
     except Exception as e:
@@ -697,6 +738,58 @@ def get_tips_live():
 def get_stats():
     return jsonify({"total_api_calls": _total_api_calls})
 
+
+@app.route("/api/analytics", methods=["GET"])
+@login_required
+def get_analytics():
+    try:
+        closed_tips = Tip.query.filter(Tip.status != 'OPEN').order_by(Tip.timestamp.asc()).all()
+        
+        realized_pl = 0
+        paper_pl = 0
+        real_wins = 0
+        real_losses = 0
+        paper_wins = 0
+        paper_losses = 0
+        
+        daily_pl = {}
+        
+        for tip in closed_tips:
+            date_str = tip.timestamp.strftime('%Y-%m-%d')
+            if date_str not in daily_pl:
+                daily_pl[date_str] = {"real": 0, "paper": 0}
+                
+            if tip.exit_price is not None:
+                profit_per_lot = (tip.exit_price - tip.entry_price) * tip.lot_size
+            elif tip.status == 'TARGET_HIT' and tip.target_price:
+                profit_per_lot = (tip.target_price - tip.entry_price) * tip.lot_size
+            elif tip.status == 'SL_HIT' and tip.stop_loss:
+                profit_per_lot = (tip.stop_loss - tip.entry_price) * tip.lot_size
+            else:
+                profit_per_lot = 0
+                
+            if tip.mode == 'TRADED':
+                realized_pl += profit_per_lot
+                daily_pl[date_str]["real"] += profit_per_lot
+                if profit_per_lot > 0: real_wins += 1
+                elif profit_per_lot < 0: real_losses += 1
+            else:
+                paper_pl += profit_per_lot
+                daily_pl[date_str]["paper"] += profit_per_lot
+                if profit_per_lot > 0: paper_wins += 1
+                elif profit_per_lot < 0: paper_losses += 1
+                
+        return jsonify({
+            "realized_pl": realized_pl,
+            "paper_pl": paper_pl,
+            "real_wins": real_wins,
+            "real_losses": real_losses,
+            "paper_wins": paper_wins,
+            "paper_losses": paper_losses,
+            "daily_pl": daily_pl
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ── Startup ───────────────────────────────────────────────────
 
