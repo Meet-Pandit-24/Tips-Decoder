@@ -597,10 +597,23 @@ def place_order():
             orderparams["price"] = str(body.get("price", 0))
 
         increment_api_call()
-        order_id = obj.placeOrder(orderparams)
+        print(f"Placing Order: {orderparams}")
+        order_response = obj.placeOrder(orderparams)
+        print(f"Order Response: {order_response}")
+        
+        if not order_response:
+            return jsonify({"error": "Failed to place order. Broker returned empty response."}), 400
+            
+        if isinstance(order_response, dict) and not order_response.get("status"):
+            # Angel One returned an error dictionary
+            error_msg = order_response.get("message", "Unknown broker error")
+            return jsonify({"error": f"Broker Error: {error_msg}"}), 400
+            
+        # Success usually returns string ID directly, or a dict with status=True
+        order_id = order_response.get("data", {}).get("orderid") if isinstance(order_response, dict) else order_response
         
         if not order_id:
-            return jsonify({"error": "Failed to place order. Broker returned empty response."}), 400
+            return jsonify({"error": "Failed to place order. No Order ID returned."}), 400
             
         return jsonify({"status": "success", "order_id": order_id})
     except Exception as e:
