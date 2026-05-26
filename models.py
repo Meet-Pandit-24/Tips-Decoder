@@ -25,7 +25,10 @@ class Tip(db.Model):
     # Trade Management
     target_price = db.Column(db.Float, nullable=True)
     stop_loss = db.Column(db.Float, nullable=True)
-    mode = db.Column(db.String(20), default='OBSERVER') # OBSERVER or TRADED
+    exit_price = db.Column(db.Float, nullable=True)
+    
+    # "OBSERVER" for paper trades, "TRADED" for real trades
+    mode = db.Column(db.String(20), default="OBSERVER") # OBSERVER or TRADED
     notes = db.Column(db.Text, nullable=True)
     
     # Status
@@ -56,13 +59,24 @@ class Tip(db.Model):
             'lot_size': self.lot_size,
             'instrument_type': self.instrument_type,
             'entry_price': self.entry_price,
-            'entry_ltp': self.entry_ltp,
-            'target_price': self.target_price,
-            'stop_loss': self.stop_loss,
-            'mode': self.mode,
-            'notes': self.notes,
-            'status': self.status,
+            "entry_ltp": self.entry_ltp,
+            "target_price": self.target_price,
+            "stop_loss": self.stop_loss,
+            "exit_price": self.exit_price,
+            "mode": self.mode,
+            "status": self.status,
+            "notes": self.notes,
             'expected_profit': expected_profit,
             'expected_loss': expected_loss,
             'rr_ratio': rr_ratio
         }
+
+class PrevCloseCache(db.Model):
+    __tablename__ = 'prev_close_cache'
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(50), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    prev_close = db.Column(db.Float, nullable=False)
+    
+    # Ensure token + date is unique
+    __table_args__ = (db.UniqueConstraint('token', 'date', name='uq_token_date'),)

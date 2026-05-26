@@ -18,7 +18,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from SmartApi import SmartConnect
 from dotenv import load_dotenv
 
-from models import db, Tip
+from models import db, Tip, PrevCloseCache
 
 load_dotenv()
 
@@ -244,16 +244,29 @@ def decode_tip(
     elif expiry_scope == "monthly":
         upcoming = sorted(filtered["expiry_dt"].dropna().unique())[:3]
         filtered = filtered[filtered["expiry_dt"].isin(upcoming)]
+    else:
+        # Limit "all" or any other scope to max 4 upcoming expiries to prevent 100-sec timeouts
+        upcoming = sorted(filtered["expiry_dt"].dropna().unique())[:4]
+        filtered = filtered[filtered["expiry_dt"].isin(upcoming)]
 
     if filtered.empty:
         return {"error": "No instruments match lot size + option type + expiry filters"}
 
     # 4. Filter tokens using cache to reduce API calls
     global _prev_close_cache, _prev_close_cache_date
+    today_date = date.today()
     with _cache_lock:
-        if _prev_close_cache_date != date.today():
+        if _prev_close_cache_date != today_date:
             _prev_close_cache = {}
-            _prev_close_cache_date = date.today()
+            _prev_close_cache_date = today_date
+            # Pre-load cache from DB to survive Render restarts
+            try:
+                cached_rows = PrevCloseCache.query.filter_by(date=today_date).all()
+                for r in cached_rows:
+                    _prev_close_cache[r.token] = r.prev_close
+                print(f"[CACHE] Loaded {len(cached_rows)} prev_close prices from DB for {today_date}")
+            except Exception as e:
+                print(f"[WARN] Failed to load PrevCloseCache from DB: {e}")
 
     tokens_by_exch = {"NFO": [], "BFO": []}
     for _, row in filtered.iterrows():
@@ -290,24 +303,35 @@ def decode_tip(
                      api_calls_this_search += 1
                      resp = obj.getMarketData("OHLC", {exch: batch})
                      if resp and resp.get("status") and resp.get("data", {}).get("fetched"):
+                         new_caches = []
                          for item in resp["data"]["fetched"]:
                              tok = str(item.get("symbolToken", ""))
+                             opt_close = float(item.get("close", 0) or 0)
                              ohlc_map[tok] = {
                                  "ltp":           float(item.get("ltp", 0) or 0),
-                                 "prev_close":    float(item.get("close", 0) or 0),
+                                 "prev_close":    opt_close,
                                  "open":          float(item.get("open", 0) or 0),
                                  "high":          float(item.get("high", 0) or 0),
                                  "low":           float(item.get("low", 0) or 0),
                                  "tradingSymbol": item.get("tradingSymbol", ""),
                              }
-                             # Update cache
+                             # Update memory cache and prepare DB insert
                              with _cache_lock:
-                                 _prev_close_cache[tok] = float(item.get("close", 0) or 0)
+                                 if tok not in _prev_close_cache:
+                                     _prev_close_cache[tok] = opt_close
+                                     new_caches.append(PrevCloseCache(token=tok, date=today_date, prev_close=opt_close))
                                  
                              # Check for exact match early exit
-                             opt_close = _prev_close_cache[tok]
                              if abs(opt_close - prev_close) < 0.01:
                                  exact_match_found = True
+                         
+                         if new_caches:
+                             try:
+                                 db.session.bulk_save_objects(new_caches)
+                                 db.session.commit()
+                             except Exception as e:
+                                 db.session.rollback()
+                                 print(f"[WARN] DB cache bulk insert failed: {e}")
                      
                      if exact_match_found:
                          break
