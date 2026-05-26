@@ -37,6 +37,23 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 
+    # Safely add missing columns to existing Postgres table on Render
+    try:
+        from sqlalchemy.sql import text
+        db.session.execute(text('ALTER TABLE decoded_tips ADD COLUMN "token" VARCHAR(50);'))
+        db.session.commit()
+        print("Successfully added 'token' column to decoded_tips table.")
+    except Exception as e:
+        db.session.rollback()
+
+    try:
+        from sqlalchemy.sql import text
+        db.session.execute(text('ALTER TABLE decoded_tips ADD COLUMN exit_price FLOAT;'))
+        db.session.commit()
+        print("Successfully added 'exit_price' column to decoded_tips table.")
+    except Exception as e:
+        db.session.rollback()
+
 # ── Globals ──────────────────────────────────────────────────
 _smart_api: SmartConnect | None = None
 _session_data: dict | None = None
