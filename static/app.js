@@ -561,6 +561,7 @@ window.openOrderModal = function(match, entryPrice) {
     
     // Fill hidden fields
     document.getElementById('orderToken').value = match.token;
+    document.getElementById('orderTradingSymbol').value = match.symbol;
     document.getElementById('orderExchange').value = 'NFO'; // Assuming NFO for options
     document.getElementById('orderUnderlying').value = match.underlying;
     document.getElementById('orderStrike').value = match.strike;
@@ -612,7 +613,7 @@ window.submitOrder = async function() {
     
     try {
         const payload = {
-            symbol: document.getElementById('orderSymbol').textContent.trim(),
+            symbol: document.getElementById('orderTradingSymbol').value,
             token: document.getElementById('orderToken').value,
             transaction_type: 'BUY',
             exchange: document.getElementById('orderExchange').value,
