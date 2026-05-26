@@ -613,7 +613,7 @@ def place_order():
                 "X-MACAddress": "00-00-00-00-00-00",
                 "X-PrivateKey": os.getenv("ANGEL_API_KEY")
             }
-            url = obj.rootUrl + "/rest/secure/angelbroking/order/v1/placeOrder"
+            url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/placeOrder"
             resp = requests.post(url, json=orderparams, headers=headers)
             order_response = resp.json()
         except Exception as e:
