@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 
 from functools import wraps
 import pyotp
+import requests
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from SmartApi import SmartConnect
