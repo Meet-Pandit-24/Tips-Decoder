@@ -625,9 +625,9 @@ def place_order():
                 "Accept": "application/json",
                 "X-UserType": "USER",
                 "X-SourceID": "WEB",
-                "X-ClientLocalIP": "127.0.0.1",
-                "X-ClientPublicIP": "127.0.0.1",
-                "X-MACAddress": "00-00-00-00-00-00",
+                "X-ClientLocalIP": getattr(obj, "clientLocalIP", "127.0.0.1"),
+                "X-ClientPublicIP": getattr(obj, "clientPublicIP", "127.0.0.1"),
+                "X-MACAddress": getattr(obj, "clientMacAddress", "00-00-00-00-00-00"),
                 "X-PrivateKey": os.getenv("ANGEL_API_KEY")
             }
             url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/placeOrder"
