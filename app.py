@@ -625,8 +625,8 @@ def place_order():
                 "Accept": "application/json",
                 "X-UserType": "USER",
                 "X-SourceID": "WEB",
-                "X-ClientLocalIP": "127.0.0.1",
-                "X-ClientPublicIP": "127.0.0.1",
+                "X-ClientLocalIP": getattr(obj, "clientLocalIP", "127.0.0.1"),
+                "X-ClientPublicIP": getattr(obj, "clientPublicIP", "127.0.0.1"),
                 "X-MACAddress": getattr(obj, "clientMacAddress", "00-00-00-00-00-00"),
                 "X-PrivateKey": os.getenv("ANGEL_API_KEY")
             }
@@ -841,7 +841,17 @@ def get_analytics():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ── Startup ───────────────────────────────────────────────────
+@app.route("/api/debug-ip", methods=["GET"])
+def get_debug_ip():
+    """Returns the Public IP of the Render server so the user can whitelist it in Angel One."""
+    import urllib.request
+    try:
+        ip = urllib.request.urlopen('https://api.ipify.org').read().decode('utf8')
+        return jsonify({"render_public_ip": ip})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── Entry Point ─────────────────────────────────────────────────────────────
 
 def warmup():
     """Pre-load instrument master and establish Angel One session on startup."""
