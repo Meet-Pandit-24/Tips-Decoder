@@ -269,6 +269,25 @@
         <div style="height:400px; margin-top:40px;">
             <canvas id="plChart"></canvas>
         </div>
+        
+        <div id="accessLogsSection" style="margin-top:40px; display:none;">
+            <h3 style="margin-bottom:15px;">Security & Access Logs</h3>
+            <div class="table-container" style="max-height: 300px; overflow-y: auto;">
+                <table class="tracker-table" style="font-size: 12px;">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>IP Address</th>
+                            <th>Role</th>
+                            <th>Endpoint</th>
+                            <th>User Agent</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accessLogsBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </section>
 </main>
 
@@ -348,6 +367,9 @@
   </div>
 </div>
 
+<script>
+    window.USER_ROLE = '{{ role }}';
+</script>
 <script src="/static/app.js"></script>
 <script src="/static/dashboard.js"></script>
 <script src="/static/analytics.js"></script>

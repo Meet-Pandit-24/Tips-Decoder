@@ -437,7 +437,7 @@ function buildMatchCard(m, idx, currentPrice) {
           <div class="save-row">
               <input type="text" id="notes_${idx}" class="save-input" placeholder="Notes (optional)...">
               <button class="save-btn" onclick='saveTip(${JSON.stringify(m).replace(/'/g, "&#39;")}, ${currentPrice}, ${idx}, "OBSERVER")'>Paper Trade (Save)</button>
-              <button class="primary-btn" style="padding: 10px 16px; font-size: 13px;" onclick='openOrderModal(${JSON.stringify(m).replace(/'/g, "&#39;")}, ${currentPrice})'>⚡ Execute Trade</button>
+              ${window.USER_ROLE === 'admin' ? `<button class="primary-btn" style="padding: 10px 16px; font-size: 13px;" onclick='openOrderModal(${JSON.stringify(m).replace(/'/g, "&#39;")}, ${currentPrice})'>⚡ Execute Trade</button>` : ''}
           </div>
       </div>
       

@@ -35,6 +35,27 @@ window.loadAnalytics = async function() {
         // Render Chart
         renderChart(data.daily_pl);
         
+        // Fetch Access Logs if admin
+        if(window.USER_ROLE === 'admin') {
+            document.getElementById('accessLogsSection').style.display = 'block';
+            try {
+                const logsRes = await fetch('/api/access-logs');
+                const logs = await logsRes.json();
+                if(!logs.error) {
+                    const tbody = document.getElementById('accessLogsBody');
+                    tbody.innerHTML = logs.map(l => `
+                        <tr>
+                            <td class="dim">${l.timestamp}</td>
+                            <td>${l.ip_address}</td>
+                            <td><span class="badge ${l.role === 'admin' ? 'badge-ce' : 'badge-pe'}">${l.role}</span></td>
+                            <td style="font-family: monospace;">${l.endpoint}</td>
+                            <td class="dim" style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${l.user_agent}">${l.user_agent}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch(e) { console.error(e); }
+        }
+        
     } catch(err) {
         console.error("Failed to load analytics:", err);
     }

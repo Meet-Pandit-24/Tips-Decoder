@@ -59,6 +59,9 @@ _smart_api: SmartConnect | None = None
 _session_data: dict | None = None
 _session_lock = threading.Lock()
 
+_decode_rate_limit = {} # { "ip": [(timestamp1), (timestamp2)] }
+_rate_limit_lock = threading.Lock()
+
 _instrument_df: pd.DataFrame | None = None
 _instrument_cache_date: date | None = None
 _instrument_lock = threading.Lock()
@@ -438,6 +441,7 @@ def _match_quality(match_pct: float) -> str:
 
 # ── Authentication ────────────────────────────────────────────
 
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -458,14 +462,24 @@ def login_required(f):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     app_password = os.getenv("APP_PASSWORD")
+    admin_password = os.getenv("ADMIN_PASSWORD", "superadmin")
+    
     # If no password configured, just redirect to home
     if not app_password:
+        session['logged_in'] = True
+        session['role'] = 'admin'
         return redirect(url_for('index'))
         
     error = None
     if request.method == "POST":
-        if request.form.get("password") == app_password:
+        pwd = request.form.get("password")
+        if pwd == admin_password:
             session['logged_in'] = True
+            session['role'] = 'admin'
+            return redirect(request.args.get("next") or url_for("index"))
+        elif pwd == app_password:
+            session['logged_in'] = True
+            session['role'] = 'guest'
             return redirect(request.args.get("next") or url_for("index"))
         else:
             error = "Invalid password."
@@ -475,6 +489,7 @@ def login():
 @app.route("/logout")
 def logout():
     session.pop('logged_in', None)
+    session.pop('role', None)
     return redirect(url_for("login"))
 
 
@@ -483,7 +498,7 @@ def logout():
 @app.route("/")
 @login_required
 def index():
-    return render_template("index.html")
+    return render_template("index.html", role=session.get("role", "admin"))
 
 
 @app.route("/api/status")
@@ -533,9 +548,33 @@ def lot_sizes():
 @app.route("/api/decode", methods=["POST"])
 @login_required
 def decode():
-    try:
-        body = request.get_json(force=True)
+    """
+    POST payload:
+    {
+       "current_price": 10.3,
+       "change": -5.55,          # either abs change or ...
+       "pct_change": -35.0,      # ... pct change. Use one or the other.
+       "lot_size": 1525,
+       "option_type": "CE",      # "CE", "PE", or "BOTH"
+       "expiry_scope": "nearest",# "nearest", "weekly", or "all"
+       "tolerance_pct": 1.0
+    }
+    """
+    
+    # Simple Rate Limiter logic: 5 req per min
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    now = datetime.now()
+    with _rate_limit_lock:
+        if ip not in _decode_rate_limit:
+            _decode_rate_limit[ip] = []
+        # Filter timestamps within the last 60 seconds
+        _decode_rate_limit[ip] = [t for t in _decode_rate_limit[ip] if (now - t).total_seconds() < 60]
+        if len(_decode_rate_limit[ip]) >= 5:
+            return jsonify({"error": "Rate limit exceeded. Please wait a minute."}), 429
+        _decode_rate_limit[ip].append(now)
 
+    body = request.get_json(force=True)
+    try:
         # Validate required fields
         current_price = float(body.get("current_price", 0))
         lot_size      = int(body.get("lot_size", 0))
@@ -589,6 +628,9 @@ def decode():
 @app.route("/api/order", methods=["POST"])
 @login_required
 def place_order():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Forbidden. Only Admin can place real trades."}), 403
+        
     try:
         body = request.get_json(force=True)
         obj = get_session()
@@ -850,6 +892,43 @@ def get_debug_ip():
         return jsonify({"render_public_ip": ip})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/access-logs", methods=["GET"])
+@login_required
+def get_access_logs():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Forbidden"}), 403
+    logs = AccessLog.query.order_by(AccessLog.timestamp.desc()).limit(100).all()
+    return jsonify([{
+        "id": l.id,
+        "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+        "ip_address": l.ip_address,
+        "role": l.role,
+        "endpoint": l.endpoint,
+        "user_agent": l.user_agent
+    } for l in logs])
+
+@app.before_request
+def log_request_info():
+    if request.path.startswith('/static/') or request.path == '/favicon.ico':
+        return
+        
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    # Get role, default to unauthenticated if not logged in
+    role = session.get('role', 'unauthenticated')
+    
+    # Fire and forget DB insertion
+    try:
+        log = AccessLog(
+            ip_address=ip or 'unknown',
+            role=role,
+            endpoint=request.path,
+            user_agent=request.user_agent.string[:500] if request.user_agent else ''
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 # ── Entry Point ─────────────────────────────────────────────────────────────
 

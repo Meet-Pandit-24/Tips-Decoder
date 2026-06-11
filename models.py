@@ -82,3 +82,12 @@ class PrevCloseCache(db.Model):
     
     # Ensure token + date is unique
     __table_args__ = (db.UniqueConstraint('token', 'date', name='uq_token_date'),)
+
+class AccessLog(db.Model):
+    __tablename__ = 'access_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    ip_address = db.Column(db.String(50), nullable=False)
+    role = db.Column(db.String(20), nullable=False) # 'admin' or 'guest'
+    endpoint = db.Column(db.String(200), nullable=False)
+    user_agent = db.Column(db.String(500))
