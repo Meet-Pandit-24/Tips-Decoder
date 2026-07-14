@@ -579,10 +579,9 @@ def decode():
         current_price = float(body.get("current_price", 0))
         lot_size      = int(body.get("lot_size", 0))
 
+        # lot_size is optional now. If 0, we search all options.
         if current_price <= 0:
             return jsonify({"error": "current_price must be > 0"}), 400
-        if lot_size <= 0:
-            return jsonify({"error": "lot_size must be > 0"}), 400
 
         # Change: prefer abs_change, fallback to pct_change
         abs_change = body.get("abs_change")
@@ -623,6 +622,127 @@ def decode():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auto-trade", methods=["POST"])
+def auto_trade():
+    """
+    Automated Webhook for Tasker / Shortcuts.
+    Accepts raw text from OCR, parses it, finds the match, and executes the trade.
+    """
+    body = request.get_json(force=True)
+    admin_password = os.getenv("ADMIN_PASSWORD", "superadmin")
+    
+    # 1. Authenticate Request
+    if body.get("admin_password") != admin_password:
+        return jsonify({"error": "Unauthorized"}), 403
+        
+    raw_text = body.get("text", "")
+    if not raw_text:
+        return jsonify({"error": "No text provided"}), 400
+        
+    # 2. Parse Text
+    import re
+    # Try to find a decimal number (Price) and another decimal number with a sign (Change)
+    # Example format: "5.39 -1.03" or "Price: 15.5 Change: +2.0"
+    matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]\d+\.\d+|[+-]\d+)', raw_text)
+    if not matches:
+        return jsonify({"error": f"Could not parse Price and Change from text: {raw_text}"}), 400
+        
+    try:
+        current_price = float(matches.group(1))
+        change = float(matches.group(2))
+    except ValueError:
+        return jsonify({"error": "Failed to parse matched numbers"}), 400
+        
+    # Optionally look for lot size or quantity
+    lot_size = 0
+    qty_match = re.search(r'(?:qty|lot|size|quantity)\D*(\d+)', raw_text, re.IGNORECASE)
+    if qty_match:
+        lot_size = int(qty_match.group(1))
+        
+    # Optionally look for CE / PE
+    option_type = "BOTH"
+    if re.search(r'\bCE\b|\bCALL\b', raw_text, re.IGNORECASE):
+        option_type = "CE"
+    elif re.search(r'\bPE\b|\bPUT\b', raw_text, re.IGNORECASE):
+        option_type = "PE"
+
+    # 3. Decode Tip
+    try:
+        decoded = decode_tip(
+            current_price=current_price,
+            abs_change=change,
+            pct_change=None,
+            lot_size=lot_size,
+            option_type=option_type,
+            expiry_scope="nearest",
+            tolerance_pct=1.0
+        )
+    except Exception as e:
+        return jsonify({"error": f"Decode error: {str(e)}"}), 500
+
+    if "error" in decoded:
+        return jsonify(decoded), 400
+        
+    matches_list = decoded.get("matches", [])
+    if not matches_list:
+        return jsonify({"error": "No matching options found"}), 404
+        
+    # 4. Check Match Quality
+    best_match = matches_list[0]
+    if best_match["match_quality"] not in ("EXACT", "STRONG"):
+        return jsonify({
+            "error": "Match quality too low to auto-trade safely", 
+            "best_match": best_match["symbol"],
+            "quality": best_match["match_quality"]
+        }), 400
+        
+    # 5. Place Order
+    try:
+        obj = get_session()
+        qty = 1 * best_match["lot_size"] # Execute 1 lot by default
+        
+        orderparams = {
+            "variety": "NORMAL",
+            "tradingsymbol": best_match["symbol"],
+            "symboltoken": best_match["token"],
+            "transactiontype": "BUY",
+            "exchange": best_match["instrumenttype"] == "OPTIDX" and "NFO" or "BFO",
+            "ordertype": "MARKET",
+            "producttype": "CARRYFORWARD",
+            "duration": "DAY",
+            "quantity": str(qty)
+        }
+        
+        orderId = obj.placeOrder(orderparams)
+        
+        # Optionally save to DB
+        tip = Tip(
+            symbol=best_match["symbol"],
+            token=best_match["token"],
+            underlying=best_match["underlying"],
+            strike=best_match["strike"],
+            expiry=best_match["expiry"],
+            opt_type=best_match["opt_type"],
+            lot_size=best_match["lot_size"],
+            instrument_type=best_match["instrumenttype"],
+            entry_price=current_price,
+            entry_ltp=best_match["ltp"],
+            mode="TRADED",
+            status="OPEN"
+        )
+        db.session.add(tip)
+        db.session.commit()
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Auto-Trade executed: BUY {best_match['symbol']} at MARKET",
+            "order_id": orderId
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Order execution failed: {str(e)}"}), 500
 
 
 @app.route("/api/order", methods=["POST"])
