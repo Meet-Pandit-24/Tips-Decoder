@@ -237,11 +237,8 @@ def decode_tip(
             if filtered.empty:
                 return {"error": f"No instruments with lot size {lot_size}"}
     else:
-        # Index Options search fallback
-        index_names = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX']
-        filtered = df[df["underlying"].isin(index_names)].copy()
-        if filtered.empty:
-             return {"error": "No Index instruments found"}
+        # If lot size is 0, search ALL options (both index and stock)
+        filtered = df.copy()
 
     # 2. Filter by option type
     if option_type in ("CE", "PE"):
