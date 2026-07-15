@@ -1207,7 +1207,9 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None):
         f"**Symbol:** {best_match['symbol']}\n"
         f"**Entry Price:** ₹{current_price}\n"
         f"**Lot Size:** {best_match['lot_size']}\n"
-        f"**Match Quality:** {best_match['match_quality']}"
+        f"**Match Quality:** {best_match['match_quality']}\n\n"
+        f"📝 **Raw OCR Log:**\n"
+        f"{raw_text.strip()}"
     )
     
     markup = telebot.types.InlineKeyboardMarkup()
