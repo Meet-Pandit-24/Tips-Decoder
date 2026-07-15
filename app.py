@@ -1225,8 +1225,18 @@ if bot:
             file_info = bot.get_file(message.photo[-1].file_id)
             file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
             
+            # Download the image from Telegram first to ensure OCR Space doesn't fail on URL fetching
+            img_response = requests.get(file_url)
+            if img_response.status_code != 200:
+                bot.send_message(chat_id, "❌ Error downloading image from Telegram.", reply_to_message_id=msg_id)
+                return
+            
             ocr_api_key = os.getenv("OCR_SPACE_API_KEY", "helloworld")
-            r = requests.post("https://api.ocr.space/parse/image", data={'apikey': ocr_api_key, 'url': file_url, 'isOverlayRequired': False})
+            r = requests.post(
+                "https://api.ocr.space/parse/image", 
+                data={'apikey': ocr_api_key, 'isOverlayRequired': False},
+                files={'file': ('image.jpg', img_response.content, 'image/jpeg')}
+            )
             ocr_result = r.json()
             
             if ocr_result.get("IsErroredOnProcessing"):
