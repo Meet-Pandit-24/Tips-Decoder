@@ -1146,18 +1146,24 @@ def telegram_webhook():
         bot.process_new_updates([update])
     return "!", 200
 
-def _process_telegram_text(raw_text, chat_id, message_id):
+def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None):
+    def send_or_edit(text, markup=None):
+        if status_msg_id:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=status_msg_id, reply_markup=markup, parse_mode="Markdown")
+        else:
+            bot.send_message(chat_id, text, reply_to_message_id=message_id, reply_markup=markup, parse_mode="Markdown")
+
     import re
     matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]\d+\.\d+|[+-]\d+)', raw_text)
     if not matches:
-        bot.send_message(chat_id, f"❌ Could not parse Price and Change from text.", reply_to_message_id=message_id)
+        send_or_edit(f"❌ Could not parse Price and Change from text.")
         return
         
     try:
         current_price = float(matches.group(1))
         change = float(matches.group(2))
     except ValueError:
-        bot.send_message(chat_id, "❌ Failed to parse matched numbers", reply_to_message_id=message_id)
+        send_or_edit("❌ Failed to parse matched numbers")
         return
         
     lot_size = 0
@@ -1182,16 +1188,16 @@ def _process_telegram_text(raw_text, chat_id, message_id):
             tolerance_pct=1.0
         )
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Decode error: {str(e)}", reply_to_message_id=message_id)
+        send_or_edit(f"❌ Decode error: {str(e)}")
         return
 
     if "error" in decoded:
-        bot.send_message(chat_id, f"❌ {decoded['error']}", reply_to_message_id=message_id)
+        send_or_edit(f"❌ {decoded['error']}")
         return
         
     matches_list = decoded.get("matches", [])
     if not matches_list:
-        bot.send_message(chat_id, "❌ No matching options found.", reply_to_message_id=message_id)
+        send_or_edit("❌ No matching options found.")
         return
         
     best_match = matches_list[0]
@@ -1212,24 +1218,26 @@ def _process_telegram_text(raw_text, chat_id, message_id):
     btn = telebot.types.InlineKeyboardButton("⚡ Execute Trade", callback_data=cb_data)
     markup.add(btn)
     
-    bot.send_message(chat_id, text, parse_mode="Markdown", reply_to_message_id=message_id, reply_markup=markup)
+    send_or_edit(text, markup=markup)
 
 if bot:
     @bot.message_handler(content_types=['photo'])
     def handle_photo(message):
         chat_id = message.chat.id
         msg_id = message.message_id
-        bot.send_chat_action(chat_id, 'typing')
+        
+        status_msg = bot.send_message(chat_id, "⏳ **Downloading image...**", parse_mode="Markdown", reply_to_message_id=msg_id)
         
         try:
             file_info = bot.get_file(message.photo[-1].file_id)
             file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
             
-            # Download the image from Telegram first to ensure OCR Space doesn't fail on URL fetching
             img_response = requests.get(file_url)
             if img_response.status_code != 200:
-                bot.send_message(chat_id, "❌ Error downloading image from Telegram.", reply_to_message_id=msg_id)
+                bot.edit_message_text("❌ Error downloading image from Telegram.", chat_id=chat_id, message_id=status_msg.message_id)
                 return
+            
+            bot.edit_message_text("🔍 **Extracting text (OCR)...**", chat_id=chat_id, message_id=status_msg.message_id, parse_mode="Markdown")
             
             ocr_api_key = os.getenv("OCR_SPACE_API_KEY", "helloworld")
             r = requests.post(
@@ -1240,18 +1248,20 @@ if bot:
             ocr_result = r.json()
             
             if ocr_result.get("IsErroredOnProcessing"):
-                bot.send_message(chat_id, f"❌ OCR API Error: {ocr_result.get('ErrorMessage')}", reply_to_message_id=msg_id)
+                bot.edit_message_text(f"❌ OCR API Error: {ocr_result.get('ErrorMessage')}", chat_id=chat_id, message_id=status_msg.message_id)
                 return
                 
             parsed_text = ocr_result.get("ParsedResults", [{}])[0].get("ParsedText", "")
             
+            bot.edit_message_text("🧠 **Decoding options and finding match...**", chat_id=chat_id, message_id=status_msg.message_id, parse_mode="Markdown")
+            
             caption = message.caption or ""
             raw_text = caption + " " + parsed_text
             
-            _process_telegram_text(raw_text, chat_id, msg_id)
+            _process_telegram_text(raw_text, chat_id, msg_id, status_msg.message_id)
             
         except Exception as e:
-            bot.send_message(chat_id, f"❌ Bot Error processing image: {str(e)}", reply_to_message_id=msg_id)
+            bot.edit_message_text(f"❌ Bot Error processing image: {str(e)}", chat_id=chat_id, message_id=status_msg.message_id)
             
     @bot.callback_query_handler(func=lambda call: call.data.startswith('trade_'))
     def handle_trade_callback(call):
