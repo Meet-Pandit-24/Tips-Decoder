@@ -628,21 +628,66 @@ def decode():
 def auto_trade():
     """
     Automated Webhook for Tasker / Shortcuts.
-    Accepts raw text from OCR, parses it, finds the match, and executes the trade.
+    Accepts raw text or an Image file, parses it via OCR Space, finds the match, and executes the trade.
     """
-    body = request.get_json(force=True)
+    import re
+    import tempfile
+    
     admin_password = os.getenv("ADMIN_PASSWORD", "superadmin")
     
+    # Support both JSON payload and multipart/form-data
+    if request.is_json:
+        body = request.get_json(force=True)
+        req_pwd = body.get("admin_password")
+        raw_text = body.get("text", "")
+    else:
+        req_pwd = request.form.get("admin_password")
+        raw_text = request.form.get("text", "")
+    
     # 1. Authenticate Request
-    if body.get("admin_password") != admin_password:
+    if req_pwd != admin_password:
         return jsonify({"error": "Unauthorized"}), 403
         
-    raw_text = body.get("text", "")
-    if not raw_text:
-        return jsonify({"error": "No text provided"}), 400
+    # 2. Image OCR Processing
+    if 'image' in request.files:
+        image_file = request.files['image']
+        if image_file.filename != '':
+            # We got an image! Send to OCR Space
+            ocr_api_key = os.getenv("OCR_SPACE_API_KEY", "helloworld")
+            
+            try:
+                # Save to temp file
+                fd, temp_path = tempfile.mkstemp(suffix=".jpg")
+                os.close(fd)
+                image_file.save(temp_path)
+                
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] OCR: Sending image to OCR Space...")
+                with open(temp_path, 'rb') as f:
+                    response = requests.post(
+                        'https://api.ocr.space/parse/image',
+                        files={'file': f},
+                        data={'apikey': ocr_api_key, 'isOverlayRequired': False}
+                    )
+                
+                os.remove(temp_path)
+                
+                ocr_result = response.json()
+                if ocr_result.get("IsErroredOnProcessing"):
+                    return jsonify({"error": "OCR API Error", "details": ocr_result.get("ErrorMessage")}), 500
+                    
+                parsed_text = ocr_result.get("ParsedResults", [{}])[0].get("ParsedText", "")
+                raw_text += " " + parsed_text
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] OCR Result:\n{parsed_text}")
+                
+            except Exception as e:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                return jsonify({"error": f"OCR Processing failed: {str(e)}"}), 500
+
+    if not raw_text.strip():
+        return jsonify({"error": "No text or image provided, or OCR failed to read text"}), 400
         
-    # 2. Parse Text
-    import re
+    # 3. Parse Text
     # Try to find a decimal number (Price) and another decimal number with a sign (Change)
     # Example format: "5.39 -1.03" or "Price: 15.5 Change: +2.0"
     matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]\d+\.\d+|[+-]\d+)', raw_text)
