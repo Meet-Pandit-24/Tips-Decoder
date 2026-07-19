@@ -395,7 +395,44 @@ function buildMatchCard(m, idx, currentPrice) {
         <span class="match-pct-label">${m.match_pct}% off</span>
       </div>
 
-      <div class="card-stats">
+      <!-- Core Entry Details & Required Margin -->
+      <div class="card-stats" style="grid-template-columns: repeat(3, 1fr); background: rgba(59, 130, 246, 0.05); margin-bottom: 12px; border: 1px solid rgba(59, 130, 246, 0.15);">
+        <div class="stat-item">
+          <span class="stat-label" style="color: var(--blue); font-weight:600;">Option LTP</span>
+          <span class="stat-value ${ltpClass}" style="font-size: 16px;">₹${m.ltp}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Lot Size</span>
+          <span class="stat-value" style="font-size: 16px;">${m.lot_size}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label" style="color: var(--gold); font-weight:600;">Required Capital (1 Lot)</span>
+          <span class="stat-value gold" style="font-size: 16px;">₹${formatNum(Math.round(m.ltp * m.lot_size))}</span>
+        </div>
+      </div>
+
+      <!-- Daily OHLC Stats -->
+      <div class="card-stats" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 12px;">
+        <div class="stat-item">
+          <span class="stat-label">Open</span>
+          <span class="stat-value dim">₹${m.open}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">High</span>
+          <span class="stat-value dim" style="color: var(--green);">₹${m.high}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Low</span>
+          <span class="stat-value dim" style="color: var(--red);">₹${m.low}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Prev Close</span>
+          <span class="stat-value dim">₹${m.opt_prev_close}</span>
+        </div>
+      </div>
+
+      <!-- Instrument Details -->
+      <div class="card-stats" style="grid-template-columns: repeat(3, 1fr);">
         <div class="stat-item">
           <span class="stat-label">Strike Price</span>
           <span class="stat-value gold">₹${formatNum(m.strike)}</span>
@@ -405,28 +442,8 @@ function buildMatchCard(m, idx, currentPrice) {
           <span class="stat-value">${m.expiry}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">Option Prev Close</span>
-          <span class="stat-value">₹${m.opt_prev_close}</span>
-        </div>
-        <div class="stat-item">
           <span class="stat-label">Your Calc Close</span>
-          <span class="stat-value gold">₹${m.calc_prev_close}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Current LTP</span>
-          <span class="stat-value ${ltpClass}">₹${m.ltp}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Today Open</span>
-          <span class="stat-value dim">₹${m.open}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">High / Low</span>
-          <span class="stat-value dim">₹${m.high} / ₹${m.low}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Lot Size</span>
-          <span class="stat-value dim">${m.lot_size}</span>
+          <span class="stat-value dim">₹${m.calc_prev_close}</span>
         </div>
       </div>
       
