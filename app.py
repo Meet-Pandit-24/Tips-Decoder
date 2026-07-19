@@ -23,7 +23,7 @@ from SmartApi import SmartConnect
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from models import db, Tip, PrevCloseCache
+from models import db, Tip, PrevCloseCache, InstrumentCache
 
 load_dotenv()
 
@@ -127,48 +127,170 @@ def get_session(force_refresh: bool = False) -> SmartConnect:
 
 # ── Instrument Master ─────────────────────────────────────────
 
+def _download_and_filter_instruments() -> list[dict]:
+    """Download the ScripMaster file from Angel One and filter to F&O options only."""
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Downloading instrument master from Angel One...")
+    resp = requests.get(INSTRUMENT_MASTER_URL, timeout=60)
+    resp.raise_for_status()
+    raw = resp.json()
+
+    # Filter to F&O options only (OPTIDX + OPTSTK on NFO + BFO)
+    filtered_data = [
+        item for item in raw 
+        if item.get("exch_seg") in ["NFO", "BFO"] 
+        and item.get("instrumenttype") in ["OPTIDX", "OPTSTK"]
+    ]
+    
+    # Free the massive raw json from memory immediately
+    del raw
+    print(f"  -> Filtered to {len(filtered_data):,} F&O option instruments")
+    return filtered_data
+
+
+def _build_dataframe(filtered_data: list[dict]) -> pd.DataFrame:
+    """Convert filtered instrument data into a cleaned DataFrame."""
+    df = pd.DataFrame(filtered_data)
+
+    # Clean up columns
+    df["lotsize"] = pd.to_numeric(df["lotsize"], errors="coerce").fillna(0).astype(int)
+    # Angel One stores strike as integer × 100 (e.g., 24000 → 2400000)
+    df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0) / 100
+
+    # Parse expiry
+    df["expiry_dt"] = pd.to_datetime(df["expiry"], format="%d%b%Y", errors="coerce")
+
+    # Option type from symbol suffix
+    df["opt_type"] = df["symbol"].str[-2:]  # CE or PE
+
+    # Underlying name (instrument name)
+    df["underlying"] = df["name"].str.strip()
+
+    return df
+
+
+def refresh_instrument_cache():
+    """Download ScripMaster, filter to F&O, save to DB, and update in-memory cache.
+    Called by the scheduler at 9:15 AM IST on weekdays and as a fallback on first request."""
+    global _instrument_df, _instrument_cache_date
+    today = date.today()
+    
+    try:
+        filtered_data = _download_and_filter_instruments()
+        
+        # Save to database (replace old data)
+        with app.app_context():
+            # Delete all old cached rows
+            InstrumentCache.query.delete()
+            
+            # Insert new rows in batches for efficiency
+            batch = []
+            for item in filtered_data:
+                batch.append(InstrumentCache(
+                    cache_date=today,
+                    token=item.get("token", ""),
+                    symbol=item.get("symbol", ""),
+                    name=item.get("name", ""),
+                    expiry=item.get("expiry", ""),
+                    strike=str(item.get("strike", "0")),
+                    lotsize=str(item.get("lotsize", "0")),
+                    instrumenttype=item.get("instrumenttype", ""),
+                    exch_seg=item.get("exch_seg", ""),
+                    tick_size=str(item.get("tick_size", ""))
+                ))
+                if len(batch) >= 1000:
+                    db.session.bulk_save_objects(batch)
+                    batch = []
+            
+            if batch:
+                db.session.bulk_save_objects(batch)
+            
+            db.session.commit()
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Saved {len(filtered_data):,} instruments to database (date: {today})")
+        
+        # Update in-memory cache
+        with _instrument_lock:
+            _instrument_df = _build_dataframe(filtered_data)
+            _instrument_cache_date = today
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ In-memory cache updated")
+            
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ Failed to refresh instrument cache: {e}")
+
+
+def _load_instruments_from_db() -> pd.DataFrame | None:
+    """Try to load today's instruments from the database. Returns None if not found."""
+    today = date.today()
+    try:
+        with app.app_context():
+            cached = InstrumentCache.query.filter_by(cache_date=today).first()
+            if cached is None:
+                return None
+            
+            # Load all rows for today
+            rows = InstrumentCache.query.filter_by(cache_date=today).all()
+            data = [{
+                "token": r.token,
+                "symbol": r.symbol,
+                "name": r.name,
+                "expiry": r.expiry,
+                "strike": r.strike,
+                "lotsize": r.lotsize,
+                "instrumenttype": r.instrumenttype,
+                "exch_seg": r.exch_seg,
+                "tick_size": r.tick_size
+            } for r in rows]
+            
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚡ Loaded {len(data):,} instruments from database (cached for {today})")
+            return _build_dataframe(data)
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] DB load failed: {e}")
+        return None
+
+
 def get_instrument_df() -> pd.DataFrame:
     global _instrument_df, _instrument_cache_date
     today = date.today()
 
     with _instrument_lock:
-        if _instrument_df is None or _instrument_cache_date != today:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Downloading instrument master...")
-            resp = requests.get(INSTRUMENT_MASTER_URL, timeout=30)
-            resp.raise_for_status()
-            raw = resp.json()
+        # 1. If in-memory cache is valid for today, return immediately
+        if _instrument_df is not None and _instrument_cache_date == today:
+            return _instrument_df
 
-            # Memory optimization: Filter directly during list comprehension before making a DataFrame
-            filtered_data = [
-                item for item in raw 
-                if item.get("exch_seg") in ["NFO", "BFO"] 
-                and item.get("instrumenttype") in ["OPTIDX", "OPTSTK"]
-            ]
-            
-            # Free the massive raw json from memory immediately
-            del raw
-            
-            df = pd.DataFrame(filtered_data)
-
-            # Clean up columns
-            df["lotsize"] = pd.to_numeric(df["lotsize"], errors="coerce").fillna(0).astype(int)
-            # Angel One stores strike as integer × 100 (e.g., 24000 → 2400000)
-            df["strike"] = pd.to_numeric(df["strike"], errors="coerce").fillna(0) / 100
-
-            # Parse expiry
-            df["expiry_dt"] = pd.to_datetime(df["expiry"], format="%d%b%Y", errors="coerce")
-
-            # Option type from symbol suffix
-            df["opt_type"] = df["symbol"].str[-2:]  # CE or PE
-
-            # Underlying name (instrument name)
-            df["underlying"] = df["name"].str.strip()
-
-            _instrument_df = df
+    # 2. Try loading from PostgreSQL database (fast, ~0.5 sec)
+    df_from_db = _load_instruments_from_db()
+    if df_from_db is not None:
+        with _instrument_lock:
+            _instrument_df = df_from_db
             _instrument_cache_date = today
-            print(f"  -> Loaded {len(df):,} NFO option instruments")
-
+        return _instrument_df
+    
+    # 3. Fallback: Download fresh from Angel One (slow, ~15-20 sec)
+    # This only happens if both in-memory AND database are empty for today
+    refresh_instrument_cache()
     return _instrument_df
+
+
+# ── APScheduler: Refresh instruments at 9:15 AM IST on weekdays ──
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
+
+_scheduler = BackgroundScheduler(daemon=True)
+_scheduler.add_job(
+    refresh_instrument_cache,
+    trigger=CronTrigger(
+        hour=9, minute=15,
+        day_of_week='mon-fri',
+        timezone=pytz.timezone('Asia/Kolkata')
+    ),
+    id='refresh_instruments',
+    name='Refresh Angel One ScripMaster (9:15 AM IST, Mon-Fri)',
+    replace_existing=True
+)
+_scheduler.start()
+print("[Scheduler] ✅ APScheduler started — ScripMaster refresh at 9:15 AM IST (Mon-Fri)")
+
 
 
 def get_upcoming_expiries(df: pd.DataFrame, count: int = 3) -> list[date]:

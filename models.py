@@ -91,3 +91,22 @@ class AccessLog(db.Model):
     role = db.Column(db.String(20), nullable=False) # 'admin' or 'guest'
     endpoint = db.Column(db.String(200), nullable=False)
     user_agent = db.Column(db.String(500))
+
+class InstrumentCache(db.Model):
+    """Stores filtered F&O option instruments from Angel One's ScripMaster.
+    Refreshed daily on weekdays at 9:15 AM IST via APScheduler."""
+    __tablename__ = 'instrument_cache'
+    id = db.Column(db.Integer, primary_key=True)
+    cache_date = db.Column(db.Date, nullable=False, index=True)
+    
+    # Core instrument fields
+    token = db.Column(db.String(50), nullable=False)
+    symbol = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    expiry = db.Column(db.String(20), nullable=False)
+    strike = db.Column(db.String(50), nullable=False)  # Raw string, converted later
+    lotsize = db.Column(db.String(20), nullable=False)
+    instrumenttype = db.Column(db.String(20), nullable=False)
+    exch_seg = db.Column(db.String(10), nullable=False)
+    tick_size = db.Column(db.String(20), nullable=True)
+
