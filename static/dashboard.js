@@ -115,17 +115,33 @@ window.syncLivePrices = async function() {
         const data = await res.json();
         
         if(data.prices) {
+            let updatedCount = 0;
             for(const [tipId, price] of Object.entries(data.prices)) {
                 const el = document.getElementById(`live_ltp_${tipId}`);
                 if(el) {
+                    const oldPrice = parseFloat(el.textContent.replace('₹', '')) || 0;
                     el.textContent = `₹${price}`;
-                    el.style.color = 'var(--accent)';
-                    setTimeout(() => el.style.color = '', 500);
+                    updatedCount++;
+                    
+                    // Flash animation based on price movement
+                    if (price > oldPrice && oldPrice > 0) {
+                        el.classList.remove('flash-up', 'flash-down');
+                        void el.offsetWidth; // Trigger reflow to restart animation
+                        el.classList.add('flash-up');
+                    } else if (price < oldPrice && oldPrice > 0) {
+                        el.classList.remove('flash-up', 'flash-down');
+                        void el.offsetWidth; // Trigger reflow to restart animation
+                        el.classList.add('flash-down');
+                    }
                 }
+            }
+            if (updatedCount > 0) {
+                window.showToast(`Updated live prices for ${updatedCount} open tips`, 'success');
             }
         }
     } catch(err) {
         console.error("Live price update failed:", err);
+        window.showToast("Failed to sync live prices", "error");
     } finally {
         if(btn) {
             btn.innerHTML = '🔄 Sync Live LTP';
@@ -143,7 +159,7 @@ window.closeTip = async function(id, newStatus) {
         
         exitPrice = parseFloat(userInput);
         if (isNaN(exitPrice)) {
-            alert("Invalid exit price. Trade not closed.");
+            window.showToast("Invalid exit price. Trade not closed.", "error");
             return;
         }
     }
@@ -158,10 +174,11 @@ window.closeTip = async function(id, newStatus) {
             body: JSON.stringify(payload)
         });
         if(res.ok) {
+            window.showToast(`Tip closed as ${newStatus}`, "success");
             await fetchTips();
         }
     } catch(err) {
-        alert("Failed to update tip status");
+        window.showToast("Failed to update tip status", "error");
     }
 };
 
@@ -172,10 +189,11 @@ window.deleteTip = async function(id) {
             method: 'DELETE'
         });
         if(res.ok) {
+            window.showToast("Tip deleted successfully", "success");
             await fetchTips();
         }
     } catch(err) {
-        alert("Failed to delete tip");
+        window.showToast("Failed to delete tip", "error");
     }
 };
 

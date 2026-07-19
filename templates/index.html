@@ -30,9 +30,12 @@
       <button class="tab-btn" data-target="analyticsView">Analytics</button>
     </div>
 
-    <div class="connection-badge" id="connectionBadge">
-      <span class="conn-dot" id="connDot"></span>
-      <span class="conn-label" id="connLabel">Connecting…</span>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div class="connection-badge" id="connectionBadge">
+        <span class="conn-dot" id="connDot"></span>
+        <span class="conn-label" id="connLabel">Connecting…</span>
+      </div>
+      <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle Light/Dark Theme">🌓</button>
     </div>
   </div>
 </header>
@@ -365,7 +368,8 @@
       <button class="primary-btn submit-btn" id="submitOrderBtn" onclick="submitOrder()" style="flex:1; background:var(--accent); color:#000;">Submit BUY Order</button>
     </div>
   </div>
-</div>
+<!-- Toast Notifications Container -->
+<div class="toast-container" id="toastContainer"></div>
 
 <script>
     window.USER_ROLE = '{{ role }}';

@@ -6,6 +6,7 @@ const state = {
 
 /* ── Init ─────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   checkConnection();
   loadLotSizes();
   setupSegmentedControls();
@@ -664,6 +665,7 @@ window.submitOrder = async function() {
         
         btn.textContent = 'Order Placed! ✅';
         btn.style.background = 'var(--green)';
+        window.showToast('Order executed & saved to tracker successfully!', 'success');
         
         setTimeout(() => {
             closeOrderModal();
@@ -677,6 +679,7 @@ window.submitOrder = async function() {
         err.style.display = 'block';
         btn.disabled = false;
         btn.textContent = 'Submit BUY Order';
+        window.showToast(e.message, 'error');
     }
 };
 
@@ -690,3 +693,58 @@ document.addEventListener('keydown', e => {
       }
   }
 });
+
+/* ── UI Enhancements: Themes & Custom Toasts ─────────────────── */
+window.showToast = function(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+    if (type === 'warning') icon = '⚠️';
+    
+    toast.innerHTML = `
+        <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:16px;">${icon}</span>
+            <div class="toast-content">${message}</div>
+        </div>
+        <button class="toast-close">&times;</button>
+    `;
+    
+    toast.querySelector('.toast-close').addEventListener('click', () => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px) scale(0.9)';
+        setTimeout(() => toast.remove(), 200);
+    });
+    
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(10px) scale(0.9)';
+            setTimeout(() => {
+                if (toast.parentNode) toast.remove();
+            }, 200);
+        }
+    }, 4000);
+};
+
+window.toggleTheme = function() {
+    const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    
+    window.showToast(`Switched to ${newTheme} mode!`, 'success');
+};
+
+window.initTheme = function() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+};
+
