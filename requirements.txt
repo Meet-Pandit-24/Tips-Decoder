@@ -11,3 +11,4 @@ psycopg2-binary>=2.9.9
 websocket-client>=1.9.0
 pyTelegramBotAPI>=4.16.1
 APScheduler>=3.10.0
+pytz>=2024.1
