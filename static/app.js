@@ -368,6 +368,35 @@ function buildMatchCard(m, idx, currentPrice) {
     : '<span class="badge badge-stk">STOCK</span>';
 
   const ltpClass   = m.ltp > m.opt_prev_close ? 'green' : (m.ltp < m.opt_prev_close ? 'red' : 'dim');
+  
+  const pred = m.predictions || {};
+  let predHtml = '';
+  
+  if (pred.spot_price) {
+    const warningsHtml = (pred.warnings || []).map(w => `<div class="warning-item">${w}</div>`).join('');
+    predHtml = `
+      <!-- Trade Assistant / Decision Support -->
+      <div class="decision-panel">
+        <div class="decision-header">🧠 Trade Assistant (Spot: ₹${formatNum(pred.spot_price)})</div>
+        <div class="decision-grid">
+          <div class="decision-box target-box">
+            <span class="decision-box-label">🎯 Suggested Target</span>
+            <span class="decision-box-value green">₹${pred.option_target}</span>
+            <span class="decision-box-profit">Est. Gain: +₹${formatNum(pred.lot_profit)} / lot</span>
+            <span class="decision-box-logic">${pred.logic_target}</span>
+          </div>
+          <div class="decision-box sl-box">
+            <span class="decision-box-label">🛑 Suggested SL</span>
+            <span class="decision-box-value red">₹${pred.option_sl}</span>
+            <span class="decision-box-loss">Est. Loss: -₹${formatNum(pred.lot_loss)} / lot</span>
+            <span class="decision-box-logic">${pred.logic_sl}</span>
+          </div>
+        </div>
+        <div class="decision-ratio">Risk-to-Reward Ratio: <strong>1 : ${pred.rr_ratio}</strong></div>
+        ${warningsHtml ? `<div class="decision-warnings">${warningsHtml}</div>` : ''}
+      </div>
+    `;
+  }
 
   return `
     <div class="match-card quality-${q}" style="animation-delay:${idx * 0.06}s">
@@ -425,11 +454,13 @@ function buildMatchCard(m, idx, currentPrice) {
         </div>
       </div>
       
+      ${predHtml}
+      
       <!-- Tracker Form -->
       <div class="save-form">
           <div class="save-row">
-              <input type="number" id="tg_${idx}" class="save-input" placeholder="Target (e.g. ${Math.round(m.ltp * 1.5)})">
-              <input type="number" id="sl_${idx}" class="save-input" placeholder="Stop Loss (e.g. ${Math.round(m.ltp * 0.7)})">
+              <input type="number" id="tg_${idx}" class="save-input" placeholder="Target Price" value="${pred.option_target || ''}">
+              <input type="number" id="sl_${idx}" class="save-input" placeholder="Stop Loss Price" value="${pred.option_sl || ''}">
               <select id="mode_${idx}" class="save-input" style="flex:0.5; display:none;">
                   <option value="OBSERVER">Paper Trade</option>
                   <option value="TRADED">Real Trade</option>
