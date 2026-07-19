@@ -350,6 +350,11 @@ function renderResults(data, elapsed, currentPrice) {
   }
 
   list.innerHTML = data.matches.map((m, i) => buildMatchCard(m, i, currentPrice)).join('');
+  
+  // Asynchronously load predictions in the background so the UI stays instant
+  data.matches.forEach((m, i) => {
+    fetchPredictions(m, i, currentPrice);
+  });
 }
 
 function buildMatchCard(m, idx, currentPrice) {
@@ -368,35 +373,6 @@ function buildMatchCard(m, idx, currentPrice) {
     : '<span class="badge badge-stk">STOCK</span>';
 
   const ltpClass   = m.ltp > m.opt_prev_close ? 'green' : (m.ltp < m.opt_prev_close ? 'red' : 'dim');
-  
-  const pred = m.predictions || {};
-  let predHtml = '';
-  
-  if (pred.spot_price) {
-    const warningsHtml = (pred.warnings || []).map(w => `<div class="warning-item">${w}</div>`).join('');
-    predHtml = `
-      <!-- Trade Assistant / Decision Support -->
-      <div class="decision-panel">
-        <div class="decision-header">🧠 Trade Assistant (Spot: ₹${formatNum(pred.spot_price)})</div>
-        <div class="decision-grid">
-          <div class="decision-box target-box">
-            <span class="decision-box-label">🎯 Suggested Target</span>
-            <span class="decision-box-value green">₹${pred.option_target}</span>
-            <span class="decision-box-profit">Est. Gain: +₹${formatNum(pred.lot_profit)} / lot</span>
-            <span class="decision-box-logic">${pred.logic_target}</span>
-          </div>
-          <div class="decision-box sl-box">
-            <span class="decision-box-label">🛑 Suggested SL</span>
-            <span class="decision-box-value red">₹${pred.option_sl}</span>
-            <span class="decision-box-loss">Est. Loss: -₹${formatNum(pred.lot_loss)} / lot</span>
-            <span class="decision-box-logic">${pred.logic_sl}</span>
-          </div>
-        </div>
-        <div class="decision-ratio">Risk-to-Reward Ratio: <strong>1 : ${pred.rr_ratio}</strong></div>
-        ${warningsHtml ? `<div class="decision-warnings">${warningsHtml}</div>` : ''}
-      </div>
-    `;
-  }
 
   return `
     <div class="match-card quality-${q}" style="animation-delay:${idx * 0.06}s">
@@ -454,13 +430,19 @@ function buildMatchCard(m, idx, currentPrice) {
         </div>
       </div>
       
-      ${predHtml}
+      <!-- Asynchronous Trade Assistant Container -->
+      <div id="decision_container_${idx}">
+        <div class="decision-panel" style="border-style: dashed; opacity: 0.6;">
+          <div class="decision-header">🧠 Trade Assistant (Spot: loading...)</div>
+          <div class="decision-ratio" style="font-style: italic;">Calculating chart-based targets and support/resistance...</div>
+        </div>
+      </div>
       
       <!-- Tracker Form -->
       <div class="save-form">
           <div class="save-row">
-              <input type="number" id="tg_${idx}" class="save-input" placeholder="Target Price" value="${pred.option_target || ''}">
-              <input type="number" id="sl_${idx}" class="save-input" placeholder="Stop Loss Price" value="${pred.option_sl || ''}">
+              <input type="number" id="tg_${idx}" class="save-input" placeholder="Target Price">
+              <input type="number" id="sl_${idx}" class="save-input" placeholder="Stop Loss Price">
               <select id="mode_${idx}" class="save-input" style="flex:0.5; display:none;">
                   <option value="OBSERVER">Paper Trade</option>
                   <option value="TRADED">Real Trade</option>
@@ -475,6 +457,68 @@ function buildMatchCard(m, idx, currentPrice) {
       
     </div>
   `;
+}
+
+async function fetchPredictions(match, idx, currentPrice) {
+  try {
+    const res = await fetch('/api/predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        match: match,
+        entry_price: currentPrice
+      })
+    });
+    
+    if (!res.ok) throw new Error("Failed to fetch predictions");
+    const pred = await res.json();
+    
+    if (pred.spot_price) {
+      const warningsHtml = (pred.warnings || []).map(w => `<div class="warning-item">${w}</div>`).join('');
+      const predHtml = `
+        <div class="decision-panel">
+          <div class="decision-header">🧠 Trade Assistant (Spot: ₹${formatNum(pred.spot_price)})</div>
+          <div class="decision-grid">
+            <div class="decision-box target-box">
+              <span class="decision-box-label">🎯 Suggested Target</span>
+              <span class="decision-box-value green">₹${pred.option_target}</span>
+              <span class="decision-box-profit">Est. Gain: +₹${formatNum(pred.lot_profit)} / lot</span>
+              <span class="decision-box-logic">${pred.logic_target}</span>
+            </div>
+            <div class="decision-box sl-box">
+              <span class="decision-box-label">🛑 Suggested SL</span>
+              <span class="decision-box-value red">₹${pred.option_sl}</span>
+              <span class="decision-box-loss">Est. Loss: -₹${formatNum(pred.lot_loss)} / lot</span>
+              <span class="decision-box-logic">${pred.logic_sl}</span>
+            </div>
+          </div>
+          <div class="decision-ratio">Risk-to-Reward Ratio: <strong>1 : ${pred.rr_ratio}</strong></div>
+          ${warningsHtml ? `<div class="decision-warnings">${warningsHtml}</div>` : ''}
+        </div>
+      `;
+      
+      // Update DOM
+      const container = document.getElementById(`decision_container_${idx}`);
+      if (container) container.innerHTML = predHtml;
+      
+      // Inject default input values
+      const tgInput = document.getElementById(`tg_${idx}`);
+      const slInput = document.getElementById(`sl_${idx}`);
+      if (tgInput) tgInput.value = pred.option_target;
+      if (slInput) slInput.value = pred.option_sl;
+    }
+  } catch (err) {
+    console.error(err);
+    const container = document.getElementById(`decision_container_${idx}`);
+    if (container) {
+      container.innerHTML = `
+        <div class="decision-panel" style="border-color: var(--red); opacity: 0.8;">
+          <div class="decision-header" style="color:var(--red);">⚠️ Prediction Failed</div>
+          <div class="decision-ratio">Could not load chart support/resistance. Using standard risk manual values.</div>
+        </div>
+      `;
+    }
+  }
 }
 
 /* ── Save Tip ────────────────────────────────────────────────── */
