@@ -233,8 +233,19 @@ def _load_instruments_from_db() -> pd.DataFrame | None:
             if cached is None:
                 return None
             
-            # Load all rows for today
-            rows = InstrumentCache.query.filter_by(cache_date=today).all()
+            # Load only required fields using query projection to bypass full ORM instantiation (OOM protection)
+            rows = db.session.query(
+                InstrumentCache.token,
+                InstrumentCache.symbol,
+                InstrumentCache.name,
+                InstrumentCache.expiry,
+                InstrumentCache.strike,
+                InstrumentCache.lotsize,
+                InstrumentCache.instrumenttype,
+                InstrumentCache.exch_seg,
+                InstrumentCache.tick_size
+            ).filter_by(cache_date=today).all()
+            
             data = [{
                 "token": r.token,
                 "symbol": r.symbol,

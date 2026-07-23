@@ -252,7 +252,7 @@ async function runDecode() {
     ? parseFloat(document.getElementById('absChange').value) : null;
   const pctChange    = document.getElementById('pctChange').value !== ''
     ? parseFloat(document.getElementById('pctChange').value) : null;
-  const lotSize      = parseInt(document.getElementById('lotSize').value);
+  let lotSize      = parseInt(document.getElementById('lotSize').value);
   const tolerance    = parseInt(document.getElementById('tolerance').value);
 
   // Validate
