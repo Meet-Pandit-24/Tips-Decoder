@@ -1645,6 +1645,9 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
     
     send_or_edit(text, markup=markup)
 
+_telegram_image_cache = {}
+_tg_cache_lock = threading.Lock()
+
 if bot:
     @bot.message_handler(content_types=['photo'])
     def handle_photo(message):
@@ -1661,6 +1664,44 @@ if bot:
             if img_response.status_code != 200:
                 bot.edit_message_text("❌ Error downloading image from Telegram.", chat_id=chat_id, message_id=status_msg.message_id)
                 return
+                
+            # Hashing check to prevent duplicate OCR calls
+            import hashlib
+            image_hash = hashlib.md5(img_response.content).hexdigest()
+            
+            # Extract sender details early
+            sender = message.from_user
+            sender_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip()
+            if sender.username:
+                sender_name += f" (@{sender.username})"
+            
+            # Extract forward source details if forwarded
+            forward_info = None
+            if message.forward_from_chat:
+                chat = message.forward_from_chat
+                forward_info = f"{chat.title or ''}"
+                if chat.username:
+                    forward_info += f" (@{chat.username})"
+            elif message.forward_from:
+                usr = message.forward_from
+                usr_name = f"{usr.first_name or ''} {usr.last_name or ''}".strip()
+                if usr.username:
+                    usr_name += f" (@{usr.username})"
+                forward_info = usr_name
+                
+            with _tg_cache_lock:
+                # Evict entries older than 2 hours to prevent memory leaks
+                now = datetime.now()
+                for k in list(_telegram_image_cache.keys()):
+                    if (now - _telegram_image_cache[k]["time"]).total_seconds() > 7200:
+                        del _telegram_image_cache[k]
+                
+                if image_hash in _telegram_image_cache:
+                    cached = _telegram_image_cache[image_hash]
+                    print(f"[CACHE] OCR Cache hit for image: {image_hash}")
+                    bot.edit_message_text("🧠 **Decoding cached match...**", chat_id=chat_id, message_id=status_msg.message_id, parse_mode="Markdown")
+                    _process_telegram_text(cached["raw_text"], chat_id, msg_id, status_msg.message_id, sender_name, forward_info)
+                    return
             
             bot.edit_message_text("🔍 **Extracting text (OCR)...**", chat_id=chat_id, message_id=status_msg.message_id, parse_mode="Markdown")
             
@@ -1683,27 +1724,14 @@ if bot:
             caption = message.caption or ""
             raw_text = caption + " " + parsed_text
             
-            # Extract sender details
-            sender = message.from_user
-            sender_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip()
-            if sender.username:
-                sender_name += f" (@{sender.username})"
-            
-            # Extract forward source details if forwarded
-            forward_info = None
-            if message.forward_from_chat:
-                chat = message.forward_from_chat
-                forward_info = f"{chat.title or ''}"
-                if chat.username:
-                    forward_info += f" (@{chat.username})"
-            elif message.forward_from:
-                usr = message.forward_from
-                usr_name = f"{usr.first_name or ''} {usr.last_name or ''}".strip()
-                if usr.username:
-                    usr_name += f" (@{usr.username})"
-                forward_info = usr_name
-
             _process_telegram_text(raw_text, chat_id, msg_id, status_msg.message_id, sender_name, forward_info)
+            
+            # Save raw text to cache
+            with _tg_cache_lock:
+                _telegram_image_cache[image_hash] = {
+                    "time": datetime.now(),
+                    "raw_text": raw_text
+                }
             
         except Exception as e:
             bot.edit_message_text(f"❌ Bot Error processing image: {str(e)}", chat_id=chat_id, message_id=status_msg.message_id)
