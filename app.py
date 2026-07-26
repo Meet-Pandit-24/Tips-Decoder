@@ -44,9 +44,18 @@ if TELEGRAM_BOT_TOKEN:
 else:
     bot = None
 
-# Create tables if they don't exist
+# Create tables if they don't exist (with retry logic to handle transient Supabase pooler timeouts)
 with app.app_context():
-    db.create_all()
+    for attempt in range(5):
+        try:
+            db.create_all()
+            print("[DB] Connection established and tables verified successfully.")
+            break
+        except Exception as db_err:
+            if attempt == 4:
+                raise db_err
+            print(f"[WARN] Database connection attempt {attempt + 1} failed: {db_err}. Retrying in 5 seconds...")
+            time.sleep(5)
 
     # Safely add missing columns to existing Postgres table on Render
     try:
