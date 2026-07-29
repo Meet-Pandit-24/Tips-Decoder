@@ -283,18 +283,33 @@ def get_instrument_df() -> pd.DataFrame:
         if _instrument_df is not None and _instrument_cache_date == today:
             return _instrument_df
 
-    # 2. Try loading from PostgreSQL database (fast, ~0.5 sec)
-    df_from_db = _load_instruments_from_db()
-    if df_from_db is not None:
-        with _instrument_lock:
+        # 2. Try loading from PostgreSQL database (fast, ~0.5 sec)
+        df_from_db = _load_instruments_from_db()
+        if df_from_db is not None:
             _instrument_df = df_from_db
             _instrument_cache_date = today
+            return _instrument_df
+        
+        # 3. Fallback: Download fresh from Angel One (slow, ~15-20 sec)
+        # This only happens if both in-memory AND database are empty for today.
+        # Since it is inside _instrument_lock, only one thread executes this.
+        try:
+            filtered_data = _download_and_filter_instruments()
+            _instrument_df = _build_dataframe(filtered_data)
+            _instrument_cache_date = today
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Fallback refresh: in-memory cache populated.")
+            
+            # Spin off DB write in a background thread
+            thr = threading.Thread(
+                target=_save_instruments_to_db_async, 
+                args=((app, app.config['SQLALCHEMY_DATABASE_URI']), filtered_data, today)
+            )
+            thr.daemon = True
+            thr.start()
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ Fallback refresh failed: {e}")
+            
         return _instrument_df
-    
-    # 3. Fallback: Download fresh from Angel One (slow, ~15-20 sec)
-    # This only happens if both in-memory AND database are empty for today
-    refresh_instrument_cache()
-    return _instrument_df
 
 
 # ── APScheduler: Refresh instruments at 9:15 AM IST on weekdays ──
