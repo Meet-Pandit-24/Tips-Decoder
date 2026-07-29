@@ -110,3 +110,25 @@ class InstrumentCache(db.Model):
     exch_seg = db.Column(db.String(10), nullable=False)
     tick_size = db.Column(db.String(20), nullable=True)
 
+
+class TelegramTipShare(db.Model):
+    __tablename__ = 'telegram_tip_shares'
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    sender_name = db.Column(db.String(150), nullable=False)
+    raw_text = db.Column(db.Text, nullable=False)
+    decoded_symbol = db.Column(db.String(100), nullable=True)
+    entry_price = db.Column(db.Float, nullable=True)
+    lot_size = db.Column(db.Integer, nullable=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'timestamp': self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else None,
+            'sender_name': self.sender_name,
+            'raw_text': self.raw_text,
+            'decoded_symbol': self.decoded_symbol or "None",
+            'entry_price': self.entry_price,
+            'lot_size': self.lot_size
+        }
+

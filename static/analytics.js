@@ -35,9 +35,11 @@ window.loadAnalytics = async function() {
         // Render Chart
         renderChart(data.daily_pl);
         
-        // Fetch Access Logs if admin
+        // Fetch Access Logs & Telegram shares if admin
         if(window.USER_ROLE === 'admin') {
             document.getElementById('accessLogsSection').style.display = 'block';
+            document.getElementById('telegramSharesSection').style.display = 'block';
+            
             try {
                 const logsRes = await fetch('/api/access-logs');
                 const logs = await logsRes.json();
@@ -50,6 +52,24 @@ window.loadAnalytics = async function() {
                             <td><span class="badge ${l.role === 'admin' ? 'badge-ce' : 'badge-pe'}">${l.role}</span></td>
                             <td style="font-family: monospace;">${l.endpoint}</td>
                             <td class="dim" style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${l.user_agent}">${l.user_agent}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch(e) { console.error(e); }
+
+            try {
+                const sharesRes = await fetch('/api/telegram-shares');
+                const shares = await sharesRes.json();
+                if(!shares.error) {
+                    const tbody = document.getElementById('telegramSharesBody');
+                    tbody.innerHTML = shares.map(s => `
+                        <tr>
+                            <td class="dim">${s.timestamp}</td>
+                            <td><strong>${s.sender_name}</strong></td>
+                            <td><span class="badge badge-ce">${s.decoded_symbol}</span></td>
+                            <td>${s.lot_size || 'N/A'}</td>
+                            <td>₹${s.entry_price || 'N/A'}</td>
+                            <td class="dim" style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${s.raw_text}">${s.raw_text}</td>
                         </tr>
                     `).join('');
                 }

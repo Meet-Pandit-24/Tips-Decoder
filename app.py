@@ -23,7 +23,7 @@ from SmartApi import SmartConnect
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from models import db, Tip, PrevCloseCache, InstrumentCache
+from models import db, Tip, PrevCloseCache, InstrumentCache, TelegramTipShare
 
 load_dotenv()
 
@@ -412,8 +412,8 @@ def decode_tip(
             if filtered.empty:
                 return {"error": f"No instruments with lot size {lot_size}"}
     else:
-        # If lot size is 0, search ALL options (both index and stock)
-        filtered = df.copy()
+        # If lot size is 0 or empty, search ONLY index options to prevent scanning 75,000 stocks and timing out
+        filtered = df[df["instrumenttype"] == "OPTIDX"].copy()
 
     # 2. Filter by option type
     if option_type in ("CE", "PE"):
@@ -1506,6 +1506,14 @@ def get_access_logs():
         "user_agent": l.user_agent
     } for l in logs])
 
+@app.route("/api/telegram-shares", methods=["GET"])
+@login_required
+def get_telegram_shares():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Forbidden"}), 403
+    shares = TelegramTipShare.query.order_by(TelegramTipShare.timestamp.desc()).limit(100).all()
+    return jsonify([s.to_dict() for s in shares])
+
 @app.before_request
 def log_request_info():
     if request.path.startswith('/static/') or request.path == '/favicon.ico':
@@ -1568,7 +1576,8 @@ def telegram_setup():
 def telegram_webhook():
     if bot:
         update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
-        bot.process_new_updates([update])
+        # Run processing asynchronously so we can return HTTP 200 instantly to Telegram and prevent duplicated retry webhooks
+        threading.Thread(target=bot.process_new_updates, args=([update],), daemon=True).start()
     return "!", 200
 
 def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, sender_name=None, forward_info=None):
@@ -1619,6 +1628,27 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
     except Exception as e:
         send_or_edit(f"❌ Decode error: {str(e)}")
         return
+
+    # Save the share log to the database (even if no exact contract is matched yet)
+    try:
+        with app.app_context():
+            m_list = decoded.get("matches", [])
+            b_symbol = m_list[0]["symbol"] if (m_list and "symbol" in m_list[0]) else "None"
+            if "error" in decoded:
+                b_symbol = f"Error: {decoded['error']}"
+                
+            share_record = TelegramTipShare(
+                sender_name=sender_name or "Telegram User",
+                raw_text=raw_text,
+                decoded_symbol=b_symbol,
+                entry_price=current_price,
+                lot_size=lot_size
+            )
+            db.session.add(share_record)
+            db.session.commit()
+            print(f"[TRACKER] Saved Telegram Tip Share from {sender_name}")
+    except Exception as db_err:
+        print(f"[WARN] Failed to save Telegram share log: {db_err}")
 
     if "error" in decoded:
         send_or_edit(f"❌ {decoded['error']}")
