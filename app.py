@@ -1607,11 +1607,12 @@ def telegram_webhook():
 def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, sender_name=None, forward_info=None):
     def send_or_edit(text, markup=None):
         if status_msg_id:
-            bot.edit_message_text(text, chat_id=chat_id, message_id=status_msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text(text, chat_id=chat_id, message_id=status_msg_id, reply_markup=markup, parse_mode="HTML")
         else:
-            bot.send_message(chat_id, text, reply_to_message_id=message_id, reply_markup=markup, parse_mode="Markdown")
+            bot.send_message(chat_id, text, reply_to_message_id=message_id, reply_markup=markup, parse_mode="HTML")
 
     import re
+    import html
     matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]\d+\.\d+|[+-]\d+)', raw_text)
     if not matches:
         send_or_edit(f"❌ Could not parse Price and Change from text.")
@@ -1650,7 +1651,7 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
             tolerance_pct=1.0
         )
     except Exception as e:
-        send_or_edit(f"❌ Decode error: {str(e)}")
+        send_or_edit(f"❌ Decode error: {html.escape(str(e))}")
         return
 
     # Save the share log to the database (even if no exact contract is matched yet)
@@ -1675,7 +1676,7 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
         print(f"[WARN] Failed to save Telegram share log: {db_err}")
 
     if "error" in decoded:
-        send_or_edit(f"❌ {decoded['error']}")
+        send_or_edit(f"❌ {html.escape(decoded['error'])}")
         return
         
     matches_list = decoded.get("matches", [])
@@ -1687,21 +1688,21 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
     
     meta_str = ""
     if sender_name:
-        meta_str += f"👤 **Shared By:** {sender_name}\n"
+        meta_str += f"👤 <b>Shared By:</b> {html.escape(sender_name)}\n"
     if forward_info:
-        meta_str += f"📢 **Source:** {forward_info}\n"
+        meta_str += f"📢 <b>Source:</b> {html.escape(forward_info)}\n"
     if meta_str:
         meta_str += "\n"
 
     text = (
-        f"✅ **Tip Decoded Successfully**\n\n"
+        f"✅ <b>Tip Decoded Successfully</b>\n\n"
         f"{meta_str}"
-        f"**Symbol:** {best_match['symbol']}\n"
-        f"**Entry Price:** ₹{current_price}\n"
-        f"**Lot Size:** {best_match['lot_size']}\n"
-        f"**Match Quality:** {best_match['match_quality']}\n\n"
-        f"📝 **Raw OCR Log:**\n"
-        f"```\n{raw_text.strip()}\n```"
+        f"<b>Symbol:</b> {html.escape(best_match['symbol'])}\n"
+        f"<b>Entry Price:</b> ₹{current_price}\n"
+        f"<b>Lot Size:</b> {best_match['lot_size']}\n"
+        f"<b>Match Quality:</b> {html.escape(best_match['match_quality'])}\n\n"
+        f"📝 <b>Raw OCR Log:</b>\n"
+        f"<pre>{html.escape(raw_text.strip())}</pre>"
     )
     
     markup = telebot.types.InlineKeyboardMarkup()
