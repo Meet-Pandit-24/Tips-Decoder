@@ -137,22 +137,47 @@ def get_session(force_refresh: bool = False) -> SmartConnect:
 # ── Instrument Master ─────────────────────────────────────────
 
 def _download_and_filter_instruments() -> list[dict]:
-    """Download the ScripMaster file from Angel One and filter to F&O options only."""
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Downloading instrument master from Angel One...")
-    resp = requests.get(INSTRUMENT_MASTER_URL, timeout=60)
-    resp.raise_for_status()
-    raw = resp.json()
-
-    # Filter to F&O options only (OPTIDX + OPTSTK on NFO + BFO)
-    filtered_data = [
-        item for item in raw 
-        if item.get("exch_seg") in ["NFO", "BFO"] 
-        and item.get("instrumenttype") in ["OPTIDX", "OPTSTK"]
-    ]
+    """Download the ScripMaster file from Angel One and filter to F&O options streamingly to save RAM."""
+    import re
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Downloading instrument master from Angel One streamingly...")
     
-    # Free the massive raw json from memory immediately
-    del raw
-    print(f"  -> Filtered to {len(filtered_data):,} F&O option instruments")
+    obj_pattern = re.compile(r'\{[^{}]+\}')
+    filtered_data = []
+    
+    with requests.get(INSTRUMENT_MASTER_URL, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        buffer = ""
+        for chunk in r.iter_content(chunk_size=1024 * 1024):
+            if not chunk:
+                continue
+            buffer += chunk.decode('utf-8', errors='ignore')
+            matches = list(obj_pattern.finditer(buffer))
+            if not matches:
+                continue
+                
+            last_end = 0
+            for m in matches[:-1]:
+                obj_str = m.group(0)
+                if ('"exch_seg":"NFO"' in obj_str or '"exch_seg":"BFO"' in obj_str) and \
+                   ('"instrumenttype":"OPTIDX"' in obj_str or '"instrumenttype":"OPTSTK"' in obj_str):
+                    try:
+                        filtered_data.append(json.loads(obj_str))
+                    except Exception:
+                        pass
+                last_end = m.end()
+            buffer = buffer[last_end:]
+            
+        if buffer:
+            for m in obj_pattern.finditer(buffer):
+                obj_str = m.group(0)
+                if ('"exch_seg":"NFO"' in obj_str or '"exch_seg":"BFO"' in obj_str) and \
+                   ('"instrumenttype":"OPTIDX"' in obj_str or '"instrumenttype":"OPTSTK"' in obj_str):
+                    try:
+                        filtered_data.append(json.loads(obj_str))
+                    except Exception:
+                        pass
+                        
+    print(f"  -> Filtered to {len(filtered_data):,} F&O option instruments streamingly")
     return filtered_data
 
 
@@ -717,9 +742,6 @@ def lot_sizes():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/decode", methods=["POST"])
-@login_required
-
 def predict_option_target_sl(symbol_info, entry_price):
     """
     Given a decoded symbol dict and the buy entry price,
@@ -954,6 +976,8 @@ def predict_option_target_sl(symbol_info, entry_price):
         "logic_sl": logic_sl
     }
 
+@app.route("/api/decode", methods=["POST"])
+@login_required
 def decode():
     """
     POST payload:
@@ -1677,7 +1701,7 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
         f"**Lot Size:** {best_match['lot_size']}\n"
         f"**Match Quality:** {best_match['match_quality']}\n\n"
         f"📝 **Raw OCR Log:**\n"
-        f"{raw_text.strip()}"
+        f"```\n{raw_text.strip()}\n```"
     )
     
     markup = telebot.types.InlineKeyboardMarkup()
