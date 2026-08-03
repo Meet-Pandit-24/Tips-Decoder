@@ -493,7 +493,7 @@ def decode_tip(
         
         # If in cache, check if it's within tolerance. If not, SKIP IT ENTIRELY!
         if tok in _prev_close_cache:
-            diff = abs(_prev_close_cache[tok] - prev_close)
+            diff = abs(round(_prev_close_cache[tok], 2) - round(prev_close, 2))
             if diff > tolerance:
                 continue # Saved an API call for this token!
                 
@@ -577,7 +577,7 @@ def decode_tip(
         if opt_prev_close <= 0:
             continue  # illiquid / no data
 
-        diff = abs(opt_prev_close - prev_close)
+        diff = abs(round(opt_prev_close, 2) - round(prev_close, 2))
         match_pct = (diff / prev_close) * 100
 
         if diff <= tolerance:

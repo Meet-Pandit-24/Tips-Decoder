@@ -490,11 +490,12 @@ async function fetchPredictions(match, idx, currentPrice) {
     if (!res.ok) throw new Error("Failed to fetch predictions");
     const pred = await res.json();
     
-    if (pred.spot_price) {
+    if (pred && pred.option_target !== undefined) {
+      const spotLabel = pred.spot_price ? `Spot: ₹${formatNum(pred.spot_price)}` : 'Spot: N/A';
       const warningsHtml = (pred.warnings || []).map(w => `<div class="warning-item">${w}</div>`).join('');
       const predHtml = `
         <div class="decision-panel">
-          <div class="decision-header">🧠 Trade Assistant (Spot: ₹${formatNum(pred.spot_price)})</div>
+          <div class="decision-header">🧠 Trade Assistant (${spotLabel})</div>
           <div class="decision-grid">
             <div class="decision-box target-box">
               <span class="decision-box-label">🎯 Suggested Target</span>
