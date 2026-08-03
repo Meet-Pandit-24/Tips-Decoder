@@ -1563,11 +1563,18 @@ def log_request_info():
 # ── Entry Point ─────────────────────────────────────────────────────────────
 
 def warmup():
-    """Pre-load instrument master and establish Angel One session on startup."""
+    """Establish Angel One session and load instrument master from database if already cached on startup."""
     try:
         get_session()
-        get_instrument_df()
-        print("[OK] Warmup complete - Tips Decoder is ready!")
+        df_from_db = _load_instruments_from_db()
+        if df_from_db is not None:
+            global _instrument_df, _instrument_cache_date
+            with _instrument_lock:
+                _instrument_df = df_from_db
+                _instrument_cache_date = date.today()
+            print("[OK] Warmup: Loaded instruments from DB cache.")
+        else:
+            print("[OK] Warmup: Database cache is empty. ScripMaster will download on the first user request.")
     except Exception as e:
         print(f"[WARN] Warmup warning: {e}")
         print("   Fill in credentials in the .env file and restart.")
