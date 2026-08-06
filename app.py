@@ -1143,7 +1143,7 @@ def auto_trade():
     # 3. Parse Text
     # Try to find a decimal number (Price) and another decimal number with a sign (Change)
     # Example format: "5.39 -1.03" or "Price: 15.5 Change: +2.0"
-    matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]\d+\.\d+|[+-]\d+)', raw_text)
+    matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]?\d+\.\d+|[+-]?\d+)', raw_text)
     if not matches:
         return jsonify({"error": f"Could not parse Price and Change from text: {raw_text}"}), 400
         
@@ -1620,7 +1620,7 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
 
     import re
     import html
-    matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]\d+\.\d+|[+-]\d+)', raw_text)
+    matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]?\d+\.\d+|[+-]?\d+)', raw_text)
     if not matches:
         send_or_edit(f"❌ Could not parse Price and Change from text.")
         return

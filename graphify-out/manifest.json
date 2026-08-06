@@ -1,0 +1,72 @@
+{
+  "app.py": {
+    "mtime": 1785743471.992536,
+    "ast_hash": "d088546ac489dbe3668a10e8570fb3c2",
+    "semantic_hash": "d088546ac489dbe3668a10e8570fb3c2"
+  },
+  "models.py": {
+    "mtime": 1785317890.6127653,
+    "ast_hash": "b246dd51156af768166782adaf2725a2",
+    "semantic_hash": "b246dd51156af768166782adaf2725a2"
+  },
+  "patch.py": {
+    "mtime": 1784113720.6999643,
+    "ast_hash": "b189286fabc874168b607432193a804a",
+    "semantic_hash": "b189286fabc874168b607432193a804a"
+  },
+  "patch2.py": {
+    "mtime": 1784113746.0485487,
+    "ast_hash": "1cb0876f524b4613fbed6256861b0081",
+    "semantic_hash": "1cb0876f524b4613fbed6256861b0081"
+  },
+  "patch_issues.py": {
+    "mtime": 1784789176.9302082,
+    "ast_hash": "47d21926f9ecf7c63a6c64f4d1423024",
+    "semantic_hash": "47d21926f9ecf7c63a6c64f4d1423024"
+  },
+  "patch_ocr_log.py": {
+    "mtime": 1784115579.0437999,
+    "ast_hash": "9028f572a911430e1cea535da1e8aea3",
+    "semantic_hash": "9028f572a911430e1cea535da1e8aea3"
+  },
+  "patch_predict.py": {
+    "mtime": 1784469926.1928532,
+    "ast_hash": "212d8e2ce140f596af17a0883c000a29",
+    "semantic_hash": "212d8e2ce140f596af17a0883c000a29"
+  },
+  "patch_route_sep.py": {
+    "mtime": 1784473102.4490004,
+    "ast_hash": "8d3d59afc574538207f4eb739a6b5d51",
+    "semantic_hash": "8d3d59afc574538207f4eb739a6b5d51"
+  },
+  "patch_status.py": {
+    "mtime": 1784114995.684878,
+    "ast_hash": "bd501aa162ee7788481c0d33e78f162a",
+    "semantic_hash": "bd501aa162ee7788481c0d33e78f162a"
+  },
+  "patch_tg_sender.py": {
+    "mtime": 1785083922.4492517,
+    "ast_hash": "1479fa5ff0d99658e3591f621dd471f1",
+    "semantic_hash": "1479fa5ff0d99658e3591f621dd471f1"
+  },
+  "photo_to_pdf.py": {
+    "mtime": 1782145296.8965912,
+    "ast_hash": "af426d90eb8280a2c6638993f56071c2",
+    "semantic_hash": "af426d90eb8280a2c6638993f56071c2"
+  },
+  "static/analytics.js": {
+    "mtime": 1785317951.3459172,
+    "ast_hash": "4143b8b1c34f5baf5ff56fd49b5fe5dd",
+    "semantic_hash": "4143b8b1c34f5baf5ff56fd49b5fe5dd"
+  },
+  "static/app.js": {
+    "mtime": 1785743462.3060524,
+    "ast_hash": "ee6c9aa3a136d57475cb47339da4842e",
+    "semantic_hash": "ee6c9aa3a136d57475cb47339da4842e"
+  },
+  "static/dashboard.js": {
+    "mtime": 1784467844.943654,
+    "ast_hash": "84cb474093affc0305af5f20a8ca977c",
+    "semantic_hash": "84cb474093affc0305af5f20a8ca977c"
+  }
+}

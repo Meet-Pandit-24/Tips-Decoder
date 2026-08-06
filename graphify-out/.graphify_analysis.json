@@ -1,0 +1,312 @@
+{
+  "communities": {
+    "0": [
+      "app",
+      "app_decode",
+      "app_delete_tip",
+      "app_get_access_logs",
+      "app_get_analytics",
+      "app_get_debug_ip",
+      "app_get_prediction",
+      "app_get_stats",
+      "app_get_telegram_shares",
+      "app_get_tips",
+      "app_index",
+      "app_login",
+      "app_login_required",
+      "app_logout",
+      "app_lot_sizes",
+      "app_rationale_1",
+      "app_rationale_1064",
+      "app_rationale_1510",
+      "app_rationale_736",
+      "app_rationale_982",
+      "app_reload_instruments",
+      "app_save_tip",
+      "app_telegram_setup",
+      "app_telegram_webhook",
+      "app_update_tip",
+      "route"
+    ],
+    "1": [
+      "static_app",
+      "static_app_buildmatchcard",
+      "static_app_checkconnection",
+      "static_app_clearfields",
+      "static_app_fetchpredictions",
+      "static_app_fillexample",
+      "static_app_flasherror",
+      "static_app_formatnum",
+      "static_app_loadlotsizes",
+      "static_app_processimageocr",
+      "static_app_renderresults",
+      "static_app_rundecode",
+      "static_app_savetip",
+      "static_app_setdecodebtn",
+      "static_app_setuistate",
+      "static_app_setupocr",
+      "static_app_setupprevclosepreview",
+      "static_app_setuprangeslider",
+      "static_app_setupsegmentedcontrols",
+      "static_app_setuptabs",
+      "static_app_showerror",
+      "static_app_state"
+    ],
+    "2": [
+      "app_calculate_prev_close",
+      "app_decode_tip",
+      "app_handle_photo",
+      "app_log_request_info",
+      "app_match_quality",
+      "app_process_telegram_text",
+      "app_rationale_374",
+      "before_request",
+      "message_handler",
+      "models",
+      "models_accesslog",
+      "models_instrumentcache",
+      "models_prevclosecache",
+      "models_rationale_96",
+      "models_telegramtipshare",
+      "models_telegramtipshare_to_dict"
+    ],
+    "3": [
+      "app_build_dataframe",
+      "app_download_and_filter_instruments",
+      "app_get_instrument_df",
+      "app_get_upcoming_expiries",
+      "app_load_instruments_from_db",
+      "app_rationale_140",
+      "app_rationale_1566",
+      "app_rationale_185",
+      "app_rationale_235",
+      "app_rationale_262",
+      "app_rationale_364",
+      "app_refresh_instrument_cache",
+      "app_save_instruments_to_db_async",
+      "app_warmup",
+      "dataframe"
+    ],
+    "4": [
+      "app_api_status",
+      "app_fetch_ohlc_batch",
+      "app_get_session",
+      "app_get_tips_live",
+      "app_increment_api_call",
+      "app_place_order",
+      "app_predict_option_target_sl",
+      "app_rationale_390",
+      "app_rationale_746",
+      "date",
+      "smartconnect"
+    ],
+    "5": [
+      "app_auto_trade",
+      "app_handle_trade_callback",
+      "app_rationale_1082",
+      "callback_query_handler",
+      "models_tip",
+      "models_tip_to_dict"
+    ],
+    "6": [
+      "static_dashboard",
+      "static_dashboard_fetchtips",
+      "static_dashboard_rendertrackertable",
+      "static_dashboard_tipsdata",
+      "static_dashboard_updateanalytics"
+    ],
+    "7": [
+      "photo_to_pdf",
+      "photo_to_pdf_create_photo_pdf",
+      "photo_to_pdf_rationale_6"
+    ],
+    "8": [
+      "static_analytics",
+      "static_analytics_renderchart"
+    ],
+    "9": [
+      "patch"
+    ],
+    "10": [
+      "patch2"
+    ],
+    "11": [
+      "patch_issues"
+    ],
+    "12": [
+      "patch_ocr_log"
+    ],
+    "13": [
+      "patch_predict"
+    ],
+    "14": [
+      "patch_route_sep"
+    ],
+    "15": [
+      "patch_status"
+    ],
+    "16": [
+      "patch_tg_sender"
+    ]
+  },
+  "cohesion": {
+    "0": 0.1753846153846154,
+    "1": 0.1471861471861472,
+    "2": 0.13333333333333333,
+    "3": 0.18095238095238095,
+    "4": 0.2545454545454545,
+    "5": 0.3333333333333333,
+    "6": 0.6,
+    "7": 0.6666666666666666,
+    "8": 1.0,
+    "9": 1.0,
+    "10": 1.0,
+    "11": 1.0,
+    "12": 1.0,
+    "13": 1.0,
+    "14": 1.0,
+    "15": 1.0,
+    "16": 1.0
+  },
+  "gods": [
+    {
+      "id": "app_login_required",
+      "label": "login_required()",
+      "degree": 17
+    },
+    {
+      "id": "app_get_session",
+      "label": "get_session()",
+      "degree": 11
+    },
+    {
+      "id": "app_get_instrument_df",
+      "label": "get_instrument_df()",
+      "degree": 11
+    },
+    {
+      "id": "app_decode_tip",
+      "label": "decode_tip()",
+      "degree": 10
+    },
+    {
+      "id": "app_decode",
+      "label": "decode()",
+      "degree": 8
+    },
+    {
+      "id": "app_increment_api_call",
+      "label": "increment_api_call()",
+      "degree": 6
+    },
+    {
+      "id": "app_build_dataframe",
+      "label": "_build_dataframe()",
+      "degree": 6
+    },
+    {
+      "id": "app_load_instruments_from_db",
+      "label": "_load_instruments_from_db()",
+      "degree": 6
+    },
+    {
+      "id": "app_predict_option_target_sl",
+      "label": "predict_option_target_sl()",
+      "degree": 6
+    },
+    {
+      "id": "app_auto_trade",
+      "label": "auto_trade()",
+      "degree": 6
+    }
+  ],
+  "surprises": [
+    {
+      "source": "save_tip()",
+      "target": "Tip",
+      "source_files": [
+        "app.py",
+        "models.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "decode_tip()",
+      "target": "PrevCloseCache",
+      "source_files": [
+        "app.py",
+        "models.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories"
+    },
+    {
+      "source": "auto_trade()",
+      "target": "Tip",
+      "source_files": [
+        "app.py",
+        "models.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories"
+    },
+    {
+      "source": "log_request_info()",
+      "target": "AccessLog",
+      "source_files": [
+        "app.py",
+        "models.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories"
+    },
+    {
+      "source": "_process_telegram_text()",
+      "target": "TelegramTipShare",
+      "source_files": [
+        "app.py",
+        "models.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories"
+    }
+  ],
+  "questions": [
+    {
+      "type": "bridge_node",
+      "question": "Why does `log_request_info()` connect `decode_tip` to `app.py`?",
+      "why": "High betweenness centrality (0.016) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `get_upcoming_expiries()` connect `get_instrument_df` to `app.py`, `get_session`?",
+      "why": "High betweenness centrality (0.016) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `fetch_ohlc_batch()` connect `get_session` to `app.py`?",
+      "why": "High betweenness centrality (0.015) - this node is a cross-community bridge."
+    },
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `state`, `tipsData` to the rest of the system?",
+      "why": "2 weakly-connected nodes found - possible documentation gaps or missing edges."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `app.js` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.1471861471861472 - nodes in this community are weakly interconnected."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `decode_tip` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.13333333333333333 - nodes in this community are weakly interconnected."
+    }
+  ]
+}
