@@ -199,6 +199,12 @@ def _build_dataframe(filtered_data: list[dict]) -> pd.DataFrame:
     # Underlying name (instrument name)
     df["underlying"] = df["name"].str.strip()
 
+    # Filter out stale stock option LEAP contracts expiring on Thursday
+    # NSE stock options shifted monthly expiry to Tuesdays since September 2025.
+    is_optstk = df["instrumenttype"] == "OPTSTK"
+    is_thursday = df["expiry_dt"].dt.dayofweek == 3  # Thursday is 3 (Mon=0, Sun=6)
+    df = df[~(is_optstk & is_thursday)].copy()
+
     return df
 
 
@@ -1648,15 +1654,16 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
         option_type = "PE"
 
     try:
-        decoded = decode_tip(
-            current_price=current_price,
-            abs_change=change,
-            pct_change=None,
-            lot_size=lot_size,
-            option_type=option_type,
-            expiry_scope="nearest",
-            tolerance_pct=1.0
-        )
+        with app.app_context():
+            decoded = decode_tip(
+                current_price=current_price,
+                abs_change=change,
+                pct_change=None,
+                lot_size=lot_size,
+                option_type=option_type,
+                expiry_scope="nearest",
+                tolerance_pct=1.0
+            )
     except Exception as e:
         send_or_edit(f"❌ Decode error: {html.escape(str(e))}")
         return
