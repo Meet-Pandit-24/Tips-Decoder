@@ -68,41 +68,36 @@ function setupOCR() {
 async function processImageOCR(imageBlob) {
     const pasteZone = document.getElementById('pasteZone');
     pasteZone.classList.add('loading');
-    pasteZone.innerHTML = '<div class="spinner" style="margin: 0 auto; width: 30px; height: 30px; border-width: 2px;"></div><p style="margin-top:10px">Extracting text via Server OCR...</p>';
+    pasteZone.innerHTML = '<div class="spinner" style="margin: 0 auto; width: 30px; height: 30px; border-width: 2px;"></div><p style="margin-top:10px">Extracting text...</p>';
     
     try {
-        const formData = new FormData();
-        formData.append('image', imageBlob);
+        const result = await Tesseract.recognize(imageBlob, 'eng');
+        const text = result.data.text;
         
-        const res = await fetch('/api/ocr', {
-            method: 'POST',
-            body: formData
-        });
+        console.log("OCR Result:", text);
         
-        if (!res.ok) {
-            const errData = await res.json();
-            throw new Error(errData.error || "OCR failed");
+        // Very basic Regex to find a number followed by space and negative/positive number
+        // e.g. "5.39 -1.03"
+        const matches = text.match(/(\d+\.\d+)\s+([+-]\d+\.\d+)/);
+        
+        if(matches && matches.length >= 3) {
+            const price = parseFloat(matches[1]);
+            const change = parseFloat(matches[2]);
+            
+            document.getElementById('currentPrice').value = price;
+            document.getElementById('absChange').value = change;
+            document.getElementById('pctChange').value = '';
+            
+            // Trigger preview update
+            document.getElementById('currentPrice').dispatchEvent(new Event('input'));
+            document.getElementById('absChange').dispatchEvent(new Event('input'));
+            
+            pasteZone.innerHTML = '<div class="paste-icon">✅</div><p>Extracted: <strong>₹' + price + '</strong> (Change: <strong>' + change + '</strong>)</p>';
+        } else {
+            pasteZone.innerHTML = '<div class="paste-icon">⚠️</div><p>Could not parse numbers automatically.</p><p class="paste-sub">Please enter manually below.</p>';
         }
-        
-        const data = await res.json();
-        const price = data.price;
-        const change = data.change;
-        
-        document.getElementById('currentPrice').value = price;
-        document.getElementById('absChange').value = change;
-        document.getElementById('pctChange').value = '';
-        if (data.lot_size) {
-            document.getElementById('lotSize').value = data.lot_size;
-        }
-        
-        // Trigger preview update
-        document.getElementById('currentPrice').dispatchEvent(new Event('input'));
-        document.getElementById('absChange').dispatchEvent(new Event('input'));
-        
-        pasteZone.innerHTML = '<div class="paste-icon">✅</div><p>Extracted: <strong>₹' + price + '</strong> (Change: <strong>' + change + '</strong>)</p>';
     } catch (err) {
-        console.error(err);
-        pasteZone.innerHTML = '<div class="paste-icon">❌</div><p>OCR Failed: ' + err.message + '</p>';
+        pasteZone.innerHTML = '<div class="paste-icon">❌</div><p>OCR Failed.</p>';
     }
     
     setTimeout(() => {
