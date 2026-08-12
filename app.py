@@ -1064,6 +1064,78 @@ def decode():
 
 
 
+@app.route("/api/ocr", methods=["POST"])
+@login_required
+def ocr_endpoint():
+    """
+    POST route to process an uploaded image via OCR Space.
+    Returns: { "price": float, "change": float, "lot_size": int }
+    """
+    import re
+    import tempfile
+    
+    if 'image' not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+        
+    image_file = request.files['image']
+    if image_file.filename == '':
+        return jsonify({"error": "Empty file name"}), 400
+        
+    ocr_api_key = os.getenv("OCR_SPACE_API_KEY", "helloworld")
+    
+    try:
+        # Create temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
+            image_file.save(temp_file.name)
+            temp_path = temp_file.name
+            
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Web OCR: Sending image to OCR Space...")
+        with open(temp_path, 'rb') as f:
+            response = requests.post(
+                'https://api.ocr.space/parse/image',
+                files={'filename': f},
+                data={'apikey': ocr_api_key, 'isOverlayRequired': False},
+                timeout=30
+            )
+            
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+            
+        response.raise_for_status()
+        ocr_result = response.json()
+        
+        if ocr_result.get("IsErroredOnProcessing"):
+            return jsonify({"error": "OCR API Error", "details": ocr_result.get("ErrorMessage")}), 500
+            
+        raw_text = ocr_result.get("ParsedResults", [{}])[0].get("ParsedText", "")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Web OCR Result:\n{raw_text}")
+        
+        # Regex matching
+        matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]?\d+\.\d+|[+-]?\d+)', raw_text)
+        if not matches:
+            return jsonify({"error": "Could not parse Price and Change from image text", "raw_text": raw_text}), 400
+            
+        current_price = float(matches.group(1))
+        change = float(matches.group(2))
+        
+        # Lot size regex matching
+        lot_size = 0
+        qty_match = re.search(r'(\d+)\s*(?:qty|lot|size|quantity)\b', raw_text, re.IGNORECASE)
+        if qty_match:
+            lot_size = int(qty_match.group(1))
+        else:
+            qty_match = re.search(r'(?:qty|lot|size|quantity)\s*[:=-]?\s*(\d+)', raw_text, re.IGNORECASE)
+            if qty_match:
+                lot_size = int(qty_match.group(1))
+                
+        return jsonify({
+            "price": current_price,
+            "change": change,
+            "lot_size": lot_size
+        })
+    except Exception as e:
+        return jsonify({"error": f"OCR processing failed: {str(e)}"}), 500
+
 @app.route("/api/predict", methods=["POST"])
 @login_required
 def get_prediction():
