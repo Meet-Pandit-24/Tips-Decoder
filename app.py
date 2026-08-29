@@ -34,6 +34,7 @@ if db_url.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {"pool_pre_ping": True, "pool_recycle": 280}
 app.secret_key = os.getenv("SECRET_KEY", "super-secret-tips-key")
 db.init_app(app)
 
@@ -92,6 +93,9 @@ _cache_lock = threading.Lock()
 
 _total_api_calls = 0
 _api_lock = threading.Lock()
+
+_api_rate_lock = threading.Lock()
+_last_api_call_time = 0.0
 
 def increment_api_call(count=1):
     global _total_api_calls
@@ -527,10 +531,16 @@ def decode_tip(
         print(f"Fetching {len(batches_to_fetch)} batches from Angel One...")
         
         def fetch_batch(exch, batch):
+            global _last_api_call_time
             try:
-                # We do a tiny sleep based on a lock to maintain rate limits across threads
-                with _instrument_lock:
-                    time.sleep(0.35)
+                # Strictly enforce Angel One rate limits (3 requests per sec = ~0.34s) without locking up the UI
+                with _api_rate_lock:
+                    now = time.time()
+                    elapsed = now - _last_api_call_time
+                    if elapsed < 0.35:
+                        time.sleep(0.35 - elapsed)
+                    _last_api_call_time = time.time()
+                    
                 increment_api_call()
                 resp = obj.getMarketData("OHLC", {exch: batch})
                 return resp
@@ -1120,20 +1130,12 @@ def auto_trade():
             ocr_api_key = os.getenv("OCR_SPACE_API_KEY", "helloworld")
             
             try:
-                # Save to temp file
-                fd, temp_path = tempfile.mkstemp(suffix=".jpg")
-                os.close(fd)
-                image_file.save(temp_path)
-                
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] OCR: Sending image to OCR Space...")
-                with open(temp_path, 'rb') as f:
-                    response = requests.post(
-                        'https://api.ocr.space/parse/image',
-                        files={'file': f},
-                        data={'apikey': ocr_api_key, 'isOverlayRequired': False}
-                    )
-                
-                os.remove(temp_path)
+                response = requests.post(
+                    'https://api.ocr.space/parse/image',
+                    files={'filename': ('image.jpg', image_file.read(), 'image/jpeg')},
+                    data={'apikey': ocr_api_key, 'isOverlayRequired': False}
+                )
                 
                 ocr_result = response.json()
                 if ocr_result.get("IsErroredOnProcessing"):
@@ -1144,8 +1146,6 @@ def auto_trade():
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] OCR Result:\n{parsed_text}")
                 
             except Exception as e:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
                 return jsonify({"error": f"OCR Processing failed: {str(e)}"}), 500
 
     if not raw_text.strip():
@@ -1779,11 +1779,10 @@ if bot:
                 forward_info = usr_name
                 
             with _tg_cache_lock:
-                # Evict entries older than 2 hours to prevent memory leaks
-                now = datetime.now()
-                for k in list(_telegram_image_cache.keys()):
-                    if (now - _telegram_image_cache[k]["time"]).total_seconds() > 7200:
-                        del _telegram_image_cache[k]
+                # Bounded cache limit (O(1) memory management) to prevent leak
+                if len(_telegram_image_cache) > 1000:
+                    for _ in range(100):
+                        _telegram_image_cache.pop(next(iter(_telegram_image_cache)))
                 
                 if image_hash in _telegram_image_cache:
                     cached = _telegram_image_cache[image_hash]
