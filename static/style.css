@@ -230,6 +230,12 @@ body {
   background: rgba(255,255,255,0.05);
   border-color: var(--text-2);
 }
+.paste-zone.dragover {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: var(--green);
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+  transform: scale(1.02);
+}
 .paste-icon { font-size: 28px; margin-bottom: 12px; opacity: 0.8; }
 .paste-zone p { margin: 0; font-size: 14px; font-weight: 500; }
 .paste-sub { font-size: 12px !important; color: var(--text-3); margin-top: 6px !important; }

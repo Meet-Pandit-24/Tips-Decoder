@@ -63,6 +63,28 @@ function setupOCR() {
       }
     }
   });
+
+  // Drag and drop support
+  pasteZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    pasteZone.classList.add('dragover');
+  });
+  
+  pasteZone.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    pasteZone.classList.remove('dragover');
+  });
+  
+  pasteZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    pasteZone.classList.remove('dragover');
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('image/')) {
+        processImageOCR(file);
+      }
+    }
+  });
 }
 
 async function processImageOCR(imageBlob) {
@@ -76,9 +98,9 @@ async function processImageOCR(imageBlob) {
         
         console.log("OCR Result:", text);
         
-        // Very basic Regex to find a number followed by space and negative/positive number
-        // e.g. "5.39 -1.03"
-        const matches = text.match(/(\d+\.\d+)\s+([+-]\d+\.\d+)/);
+        // Enhanced Regex to match the robust Python backend regex
+        // e.g. "5.66 -0.81" or "20 5"
+        const matches = text.match(/(\d+\.\d+|\d+)\s+([+-]?\d+\.\d+|[+-]?\d+)/);
         
         if(matches && matches.length >= 3) {
             const price = parseFloat(matches[1]);
@@ -87,6 +109,11 @@ async function processImageOCR(imageBlob) {
             document.getElementById('currentPrice').value = price;
             document.getElementById('absChange').value = change;
             document.getElementById('pctChange').value = '';
+            
+            const lotMatch = text.match(/(\d+)\s*(?:qty|lot|size|quantity)\b/i) || text.match(/(?:qty|lot|size|quantity)\s*[:=-]?\s*(\d+)/i);
+            if(lotMatch && lotMatch[1]) {
+                document.getElementById('lotSize').value = parseInt(lotMatch[1]);
+            }
             
             // Trigger preview update
             document.getElementById('currentPrice').dispatchEvent(new Event('input'));
