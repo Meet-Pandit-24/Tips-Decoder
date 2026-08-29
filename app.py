@@ -230,8 +230,13 @@ def _save_instruments_to_db_async(app_context_data, filtered_data, today):
                 })
             
             InstrumentCache.query.delete()
-            db.session.bulk_insert_mappings(InstrumentCache, mappings)
             db.session.commit()
+            
+            chunk_size = 5000
+            for i in range(0, len(mappings), chunk_size):
+                db.session.bulk_insert_mappings(InstrumentCache, mappings[i:i+chunk_size])
+                db.session.commit()
+            
             print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Async DB save complete: {len(mappings):,} rows saved.")
         except Exception as e:
             db.session.rollback()
@@ -1628,7 +1633,7 @@ def _process_telegram_text(raw_text, chat_id, message_id, status_msg_id=None, se
     import html
     matches = re.search(r'(\d+\.\d+|\d+)\s+([+-]?\d+\.\d+|[+-]?\d+)', raw_text)
     if not matches:
-        send_or_edit(f"❌ Could not parse Price and Change from text.")
+        send_or_edit(f"❌ Could not parse Price and Change from text.\n\nRaw Text:\n{html.escape(raw_text)}")
         return
         
     try:
